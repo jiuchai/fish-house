@@ -1,0 +1,180 @@
+:root { color-scheme: light; }
+* { box-sizing: border-box; }
+html, body {
+  margin: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: transparent;
+}
+body {
+  display: block;
+  padding: 0;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  user-select: none;
+}
+#stage {
+  --scale: 0.7;
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  height: 100vh;
+  max-height: none;
+  border-radius: 0;
+  overflow: hidden;
+  background: transparent;
+  filter: drop-shadow(0 18px 40px rgba(25, 40, 60, .22));
+}
+#stage:fullscreen {
+  width: 100vw;
+  height: 100vh;
+  max-height: none;
+  border-radius: 0;
+  background: #f7f3ea;
+}
+.pet-video {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  opacity: 0;
+  transition: opacity var(--fade, 400ms) ease;
+  pointer-events: none;
+  background: transparent;
+}
+.empty {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 28px;
+  text-align: center;
+  color: #5d5145;
+  background: radial-gradient(circle at 50% 35%, rgba(255, 248, 232, .98), rgba(247, 235, 215, .92));
+  border: 1px solid rgba(180, 150, 110, .22);
+  border-radius: 26px;
+}
+.empty.hidden, .hidden { display: none !important; }
+.empty-title { font-size: 20px; font-weight: 700; margin-bottom: 8px; }
+.empty-text { font-size: 13px; line-height: 1.7; max-width: 340px; opacity: .78; }
+.status {
+  position: absolute;
+  left: 14px;
+  bottom: 22px;
+  max-width: calc(100% - 28px);
+  padding: 6px 10px;
+  border-radius: 999px;
+  color: #4b4036;
+  background: rgba(255, 252, 245, .78);
+  border: 1px solid rgba(160, 135, 105, .16);
+  font-size: 11px;
+  line-height: 1.4;
+  opacity: 0;
+  transform: translateY(4px);
+  transition: opacity .2s ease, transform .2s ease;
+  pointer-events: none;
+}
+#stage:hover .status { opacity: .85; transform: translateY(0); }
+.start, .sound {
+  position: fixed;
+  z-index: 5;
+  border: 0;
+  cursor: pointer;
+  color: #fff;
+  background: rgba(60, 82, 105, .82);
+  backdrop-filter: blur(8px);
+  transition: background .2s ease, transform .2s ease;
+}
+.start {
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  padding: 12px 20px;
+  border-radius: 999px;
+  font-size: 14px;
+  letter-spacing: .04em;
+}
+.start:hover, .sound:hover { background: rgba(45, 65, 88, .94); }
+.start.hidden { display: none; }
+.sound {
+  right: 20px;
+  top: 18px;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  font-size: 16px;
+  line-height: 1;
+  opacity: .55;
+}
+.sound:hover { opacity: 1; }
+.sound.muted { opacity: .8; }
+.sound.hint {
+  width: auto;
+  padding: 0 12px;
+  border-radius: 999px;
+  font-size: 12px;
+  letter-spacing: .02em;
+  opacity: .95;
+}
+.sound.attention {
+  opacity: .95;
+  animation: sound-pulse 2.2s ease-out infinite;
+}
+@keyframes sound-pulse {
+  0% { box-shadow: 0 0 0 0 rgba(255, 214, 140, .6); }
+  70% { box-shadow: 0 0 0 9px rgba(255, 214, 140, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(255, 214, 140, 0); }
+}
+
+.bubble {
+  position: fixed;
+  left: 50%;
+  bottom: 58px;
+  transform: translateX(-50%);
+  z-index: 6;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: min(82vw, 560px);
+  padding: 7px 14px 7px 12px;
+  border-radius: 999px;
+  color: #f6f3ec;
+  background: rgba(28, 27, 25, .72);
+  border: 1px solid rgba(255, 255, 255, .16);
+  box-shadow: 0 8px 26px rgba(0, 0, 0, .22);
+  backdrop-filter: blur(14px) saturate(1.1);
+  font-size: 13px;
+  line-height: 1.45;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  transition: opacity .2s ease, transform .2s ease;
+}
+.bubble.hidden { display: none !important; }
+#bubbleText {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.bubble-dot {
+  flex: 0 0 auto;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #86e0a8;
+  box-shadow: 0 0 0 0 rgba(134, 224, 168, .55);
+  animation: bubble-pulse 1.9s ease-out infinite;
+}
+@keyframes bubble-pulse {
+  0% { box-shadow: 0 0 0 0 rgba(134, 224, 168, .5); }
+  70% { box-shadow: 0 0 0 7px rgba(134, 224, 168, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(134, 224, 168, 0); }
+}
+
+@media (max-width: 640px) {
+  body { padding: 8px; }
+  .bubble { bottom: 52px; max-width: 86vw; font-size: 12.5px; padding: 6px 12px 6px 10px; }
+}

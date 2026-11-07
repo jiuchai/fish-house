@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>大肥鱼的小屋</title>
+  <link rel="stylesheet" href="./style.css?v=1.8.0" />
+</head>
+<body>
+  <main id="stage" aria-label="大肥鱼的小屋桌宠">
+    <video id="videoA" class="pet-video" muted playsinline preload="auto"></video>
+    <video id="videoB" class="pet-video" muted playsinline preload="auto"></video>
+    <div id="empty" class="empty hidden">
+      <div class="empty-title">大肥鱼还在睡觉</div>
+      <div class="empty-text">还没有导入视频，去 AstrBot 插件面板「大肥鱼的小屋」导入 7 段视频吧</div>
+    </div>
+    <div id="status" class="status" aria-live="polite">正在醒来…</div>
+    <div id="bubble" class="bubble hidden" role="status"><span class="bubble-dot" aria-hidden="true"></span><span id="bubbleText"></span></div>
+  </main>
+  <button id="start" class="start hidden" type="button">点一下播放</button>
+  <button id="sound" class="sound" type="button" title="关闭声音" aria-label="关闭声音">🔊</button>
+  <script src="./app.js?v=1.8.0"></script>
+</body>
+</html>

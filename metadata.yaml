@@ -1,0 +1,28 @@
+﻿name: astrbot_plugin_fish_house
+display_name: 大肥鱼的小屋
+short_desc: 会休息、拿手机、去电脑的视频桌宠，WebUI 导入视频，独立链接观看
+desc: |
+  把「大肥鱼」做成一个视频桌宠：
+
+  - 啥也不干时休息视频循环；
+  - 回消息时拿起手机、玩手机、放下手机，再回休息；
+  - 干活时先去电脑，走到电脑旁边后才开始执行实际操作；
+  - 干完活从电脑回到休息，所有片段顺序播放；
+  - 片段之间叠化衔接，播完一个才播下一个；
+  - 内置 7 段默认视频，装好就能看，默认带声音；面板可逐段选择哪段出声；
+  - WebUI 导入/替换 7 段视频，带状态预览和手动触发；
+  - 提供独立公共链接，不需要登录 AstrBot 面板也能看桌宠。
+version: 1.9.2
+author: dafeiyu
+astrbot_version: ">=4.9.0"
+support_platforms:
+  - aiocqhttp
+  - qq_official
+  - weixin_oc
+  - webchat
+  - telegram
+tags:
+  - pet
+  - video
+  - webui
+

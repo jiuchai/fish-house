@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>大肥鱼的小屋</title>
+  <link rel="stylesheet" href="./style.css?v=1.8.0" />
+  <!-- 必须在 app.js 之前加载：AstrBot 的插件页在 sandbox iframe 里没有 allow-same-origin，
+       页面只能通过这个桥接访问插件接口。 -->
+  <script src="/api/plugin/page/bridge-sdk.js"></script>
+</head>
+<body>
+  <header class="topbar">
+    <div>
+      <h1>大肥鱼的小屋</h1>
+      <p class="sub">休息、手机、电脑三段式视频桌宠 · 片段顺序播放 · 叠化衔接</p>
+    </div>
+    <div class="state-box">
+      <span id="statePill" class="pill">休息</span>
+      <span id="stateText" class="muted">正在读取…</span>
+    </div>
+  </header>
+
+  <div id="apiError" class="api-error hidden"></div>
+
+  <section class="section-head">
+    <div>
+      <h2>内置了 7 段默认视频</h2>
+      <p class="muted">装好就能看；想换素材就点槽位里的“上传视频”或“用地址”替换，进度条走完会自动按视频长度衔接。</p>
+    </div>
+    <div class="legend">
+      <span>休息 → 拿手机 → 玩手机 → 放手机 → 去电脑 → 玩电脑 → 回休息</span>
+    </div>
+  </section>
+
+  <section id="slots" class="slot-grid"></section>
+
+  <section class="card hero">
+    <div class="hero-copy">
+      <h2>独立桌宠链接</h2>
+      <p class="muted">把链接拖进 OBS 浏览器源，或直接用浏览器打开。页面不需要登录 AstrBot 面板。</p>
+      <div class="link-row">
+        <input id="publicUrl" readonly />
+        <button id="copyLink" class="btn primary" type="button">复制链接</button>
+        <button id="openLink" class="btn" type="button">打开</button>
+      </div>
+      <p id="publicHint" class="hint"></p>
+    </div>
+    <div class="hero-actions">
+      <button class="btn warm" data-action="reply" type="button">回消息</button>
+      <button class="btn cool" data-action="work_start" type="button">去电脑干活</button>
+      <button class="btn" data-action="work_end" type="button">干完回休息</button>
+      <button class="btn ghost" data-action="rest" type="button">强制休息</button>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>导出插件</h2>
+    <p class="muted">把当前插件源码、面板和公共页打成一个 zip，可以拿到别的 AstrBot 里安装。不会包含你上传的视频、配置和备份。</p>
+    <div class="row">
+      <a id="exportPlugin" class="btn primary" href="#" download>下载插件 zip</a>
+      <span id="exportHint" class="hint">正在准备…</span>
+    </div>
+  </section>
+
+  <section class="card bubble-card">
+    <div class="section-head compact">
+      <div>
+        <h2>活动气泡</h2>
+        <p class="muted">显示在公共桌宠底部，例如「帮主人查资料」「我去逛一下抖音」。Bot 也可以自己调用 house_activity 写入。</p>
+      </div>
+    </div>
+    <div class="bubble-row">
+      <input id="bubbleText" maxlength="120" placeholder="帮主人查资料" />
+      <button id="sendBubble" class="btn warm" type="button">发送气泡</button>
+      <button id="clearBubble" class="btn ghost" type="button">清空</button>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>备份与恢复</h2>
+    <p class="muted">更新插件、替换视频或清空槽位前，会自动把配置和视频备份到插件数据目录的 <code>backups/</code>。恢复时会把备份里的视频和槽位配置一起还原。</p>
+    <div class="bubble-row">
+      <select id="backupSelect" class="backup-select"><option value="">还没有备份</option></select>
+      <button id="restoreBackup" class="btn danger" type="button">恢复选中的备份</button>
+    </div>
+    <p id="backupHint" class="hint">正在读取备份…</p>
+  </section>
+
+  <section class="card settings">
+    <div class="section-head compact">
+      <div>
+        <h2>播放设置</h2>
+        <p class="muted">叠化和显示大小。</p>
+      </div>
+    </div>
+    <div class="form-grid">
+      <label>叠化时长（毫秒）<input id="crossfade" type="number" min="0" max="3000" step="50" /></label>
+      <label class="check-line"><input id="autoReply" type="checkbox" /> 自动播放回消息动画</label>
+    </div>
+    <div class="settings-actions">
+      <button id="saveSettings" class="btn primary" type="button">保存设置</button>
+      <button id="refreshSync" class="btn ghost" type="button">重新同步公共页</button>
+    </div>
+  </section>
+
+  <section class="card api-card">
+    <div class="section-head compact">
+      <div>
+        <h2>机器人接口</h2>
+        <p class="muted">机器人也可以直接调用接口：任何任务开始/结束都能控制电脑动画，还能写底部活动气泡。请求需要 AstrBot API Key。</p>
+      </div>
+    </div>
+    <div class="api-row">
+      <code id="apiEndpoint"></code>
+      <button id="copyApi" class="btn small" type="button">复制</button>
+    </div>
+    <pre id="apiExample" class="api-example"></pre>
+    <p class="hint">在 AstrBot 的 API Key 页面创建一个 Key，放到 Authorization: Bearer 后面。动作：reply / work_start / work_end / rest / bubble。</p>
+  </section>
+
+  <p class="footer">大肥鱼的小屋 · 视频按顺序播放，不并行抢帧</p>
+
+  <div id="toast" class="toast" role="status"></div>
+  <script src="./app.js?v=1.8.0"></script>
+</body>
+</html>

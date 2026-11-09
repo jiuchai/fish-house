@@ -1,262 +1,341 @@
-﻿# 大肥鱼的小屋（astrbot_plugin_fish_house）v1.9.2
+# 大肥鱼的小屋
 
-> 这是 **v1.9.2 早期版本**的源码存档：7 段视频槽位 + 叠化播放 + WebUI 面板 + 独立公共页。
-> 后续的画布/素材库版本不在这个仓库里。
->
-> License: MIT
+> 给 AstrBot 用的视频桌宠插件。休息、拿手机、回消息、去电脑、干活、回窝，全部用视频演出来。
 
-把大肥鱼做成一个**视频桌宠**：休息时循环休息视频，回消息时拿手机，干活时去电脑，干完活再回休息。视频按顺序播放，片段之间叠化，不会多个视频同时抢帧。
+**v2.0.0 正式版** · AstrBot >= 4.9.0 · Vue 3 面板 · MIT License
 
-## 一、打开
+---
 
-- AstrBot 管理面板 → 插件 → 大肥鱼的小屋 → 打开面板。
-- 面板最上面是 **7 个视频槽位**，默认已经装好一套内置视频，打开公共链接就能直接看。
-- 想换素材，点槽位的「上传视频」或「用地址」替换即可。
-- 独立公共链接（不需要登录面板）：
+## 简介
+
+大肥鱼的小屋把「大肥鱼」做成一个会活动的视频桌宠：
+
+- 空闲时循环播放休息视频；
+- 收到消息时拿起手机、回消息、放下手机；
+- 有任务时先走到电脑旁，到位后才开始处理；
+- 任务结束自动回休息；
+- 所有片段顺序播放，片段之间叠化，不会多个视频抢帧；
+- 提供独立壁纸页面，可直接放进 OBS 浏览器或当作桌面壁纸。
+
+v2.0.0 是正式版基线，包含完整的 Vue 3 管理面板、项目制主题编辑、主题市场和内置默认主题。
+
+---
+
+## 功能特性
+
+### 桌宠状态机
+
+- 7 段内置视频，首次安装自动装入；
+- 休息 / 手机 / 电脑三套状态自动切换；
+- 任务开始前先完成「拿手机 → 走到电脑」的前置动作；
+- 任务中可设置活动气泡，例如「帮主人查资料」；
+- 空闲超时自动回休息，长任务有安全上限；
+- 明确说「回去休息 / 累了 / 去躺着」时，先回复再切回休息。
+
+### Vue 3 管理面板
+
+顶部 6 个 Tab：
+
+| Tab | 内容 |
+| --- | --- |
+| 首页 | 当前主题封面、素材/动作/节点/主题统计、只读画布、壁纸链接 |
+| 主题 | 本地主题库、导入/导出、应用/编辑/删除 |
+| 项目 | 每个主题独立素材、封面、画布、保存与应用 |
+| 市场 | 搜索分页、登录、上传/更新、点赞/收藏/下载量、下载冲突处理 |
+| 我的 | 我发布的、收藏、点赞 |
+| 设置 | 播放、活动气泡、主题市场地址 |
+
+面板使用本地 Vue 3 和 Element Plus，不依赖 CDN；在 AstrBot 的 sandbox 页面里通过 bridge 调用接口。
+
+### 项目制主题编辑
+
+- 一个主题 = 一个项目；
+- 项目内独立保存素材、封面、画布、设置；
+- 新建项目是空项目，只保留一个循环等待节点；
+- 支持复制项目，在副本上改；
+- 「保存信息」只写项目包；
+- 「应用为桌宠」才覆盖线上配置；
+- 项目可导出 `.fishtheme`，包含素材和封面。
+
+### 动作画布
+
+- 节点拖拽、缩放、平移；
+- 从节点右侧圆点拖到目标节点建立连线；
+- 点击节点或连线选中，按 Delete / Backspace 删除；
+- 右键节点或连线快速删除；
+- 删除节点会级联清理相连的边；
+- 画布至少保留一个循环播放节点，删最后一个会被阻止；
+- 当前播放节点整张卡片绿色高亮。
+
+节点类型：
+
+| 类型 | 行为 |
+| --- | --- |
+| 循环等待 | 停在原地等消息，收到消息后按出边继续 |
+| 回消息/工作 | 可回消息，也可接任务；无任务一分钟走下一个节点 |
+| 仅工作 | 只接任务，不处理消息 |
+| 仅回消息 | 只回复消息，不接工作 |
+| 动作 | 播一次，按出边继续 |
+| 过渡 | 播完，按出边继续 |
+
+循环等待节点固定显示在画布左右两侧：
+
+- 左侧是出口，默认连到「收到消息」；
+- 右侧是入口，表示任务/流程完成；
+- 两侧纵向位置同步，水平位置锁定；
+- 左右标签分别是「提前收到消息」「完成任务」。
+
+### 主题市场
+
+插件自带主题市场客户端，默认地址：
+
+```text
+https://shop.swellengine.com/
+```
+
+功能：
+
+- 邮箱注册、用户名或邮箱登录；
+- 登录状态按 AstrBot 用户保存在插件后端，刷新页面不需要重新登录；
+- 搜索、分页；
+- 上传当前项目，或更新已上传主题；
+- 编辑市场主题的名称、版本、介绍；
+- 点赞、收藏、下载；
+- 下载冲突三选一：重命名 / 覆盖 / 取消；
+- 「我的」显示发布、收藏、点赞。
+
+服务端是独立的 FastAPI + SQLite 项目，源码在 `fish-house-theme-server/`，可 Docker 部署。
+
+### 独立壁纸页面
 
 ```text
 http://服务器地址:6185/fish_house/index.html
 ```
 
-面板顶部会显示当前服务器的实际链接，点“复制链接”即可。
+- 不需要登录 AstrBot；
+- 可直接放进 OBS 浏览器源；
+- 页面会自动读取桌宠状态；
+- 视频默认带声，被浏览器拦截时回退静音，并提供声音按钮。
 
-> 页面使用 AstrBot 自带的 public 静态目录，插件启动 / 保存设置时会自动把页面和视频同步过去。如果 `dashboard/dist` 不存在，面板会提示同步失败。
+### 权限开关
 
-## 二、7 段视频
-
-插件自带一套默认素材（`assets/videos/`），第一次加载时会自动装进数据目录并填满槽位：
-
-| 槽位 | 用途 | 内置文件 |
-| --- | --- | --- |
-| `rest` | 休息循环，啥也不干时播放 | `rest.mp4`（休息状态） |
-| `phone_pickup` | 拿起手机 | `phone_pickup.mp4` |
-| `phone_loop` | 玩手机 / 回消息循环 | `phone_loop.mp4` |
-| `phone_putdown` | 放下手机 | `phone_putdown.mp4` |
-| `computer_go` | 从休息处去电脑 | `computer_go.mp4` |
-| `computer_loop` | 玩电脑 / 干活循环 | `computer_loop.mp4` |
-| `computer_rest` | 干完活从电脑回休息 | `computer_rest.mp4` |
-
-在面板里给每个槽位替换视频。每段下方有「播放有声」勾选，默认全开，可以只让其中几段出声。支持：
-
-- MP4 / WebM / M4V / MOV；
-- 单个最大 200MB（可配置）；
-- 也可以“用地址”填 http(s) 链接或 `/fish_house/...` 公共路径；
-- 视频保存在 `data/plugin_data/astrbot_plugin_fish_house/videos/`，同时复制到公共目录。
-
-建议 7 段使用相同分辨率、帧率、机位；转场视频的首尾帧与对应状态衔接。想要透明桌宠，请导入 **带 alpha 的 WebM**；MP4 不支持透明背景。
-
-## 三、状态机
-
-### 休息
-
-- `rest` 循环播放。
-
-### 回消息
-
-```text
-rest → phone_pickup → phone_loop → phone_putdown → rest
-```
-
-- 每一段都**播放到视频末尾**才进入下一段，不按固定秒数硬切；
-- `phone_loop` 只播一遍，播完自动放下手机；
-- **Bot 的回复会等桌宠真正拿起手机（phone_pickup 播完、进入 phone_loop）后才发出**；
-- 已经在手机状态时回复会立即发出；
-- 如果已经在电脑状态，**不会**去拿手机，消息直接在电脑前发出。
-
-### 去电脑干活
-
-任务类请求（「打开抖音 / 查天气 / 搜资料 / 整理文件」等）会**先拿手机看一眼，再走到电脑，到了才动手**：
-
-```text
-rest
-→ phone_pickup      ← 拿起手机看消息
-→ phone_loop
-→ phone_putdown
-→ computer_go       ← 放手机、走向电脑
-→ computer_loop     ← 到电脑后才开始实际任务
-```
-
-- 用户消息本身是任务时，在 **LLM 开始处理前**插件就先让桌宠拿手机、去电脑，
-  并**等它真正走到电脑旁边**才把请求放行；所以打开抖音、浏览器、执行工具都不会早于桌宠到位；
-- 模型主动调用 `house_work_start` 时也一样：这个工具会等整段“拿手机→走过去”动画结束才返回；
-- 已经在电脑旁边时不额外等待；正在拿手机时会等它把手上的手机放下再走过去；
-- `computer_loop` 循环，直到任务结束；
-- **干活时不会被打断**：模型每次请求、每个工具执行都会重置/暂停空闲计时，工具跑完再重新计时；
-- 一轮活干完后，`idle_seconds`（默认 60 秒）内没有新动作就自动 `computer_rest → rest`；
-- **直接说「回去休息 / 下班 / 回窝」会先原地回复你，消息发出后立即回休息**，不依赖模型是否记得调用 `house_work_end`，也不会闪出“拿手机”动画；
-- 长任务用 `house_work_ping` 续期；它会把“已结束”状态撤销，重新算干活中；
-- 安全兜底：万一任务异常一直不结束，超过 `max_work_seconds`（默认 30 分钟）会强制回休息；
-- 不再和记账绑定：查资料、逛网页、整理文件、写报告、刷视频都可以算干活。
-
-### 干完活
-
-```text
-computer → （等 idle_seconds）→ computer_rest → rest
-phone → phone_putdown → rest
-```
-
-## 四、叠化与播放顺序
-
-- 任意时刻只有**一个视频在播放**；
-- 每个片段必须播完（`ended`）才会播下一个，不按固定秒数切；
-- 循环片段（休息 / 手动电脑）被状态切换打断时，先暂停在当前帧，再叠化到下一个片段；
-- 叠化时长默认 400ms，可在面板调整；
-- 衔接时**画面和声音一起渐变**：新片段音量 0→1、旧片段 1→0，和叠化同步，不会突然切换声音；
-- 过渡缺失时会自动跳过该段，例如没有 `phone_pickup` 就直接进入 `phone_loop`。
-
-## 五、公共页与活动气泡
-
-公共页覆盖整个窗口：
-
-- 视频铺满浏览器窗口，`object-fit: cover`；
-- 底部一个胶囊状态提示（离底边留了距离，不贴边），显示 Bot 正在做什么；
-- 默认带声音；浏览器拦下有声自动播放时会先静音播，点右上角喇叭就能开声音（选择会记住）；
-- 面板里每段视频都有「播放有声」勾选，可以逐段决定哪段出声（比如只让休息视频有环境音，其他静音）；
-- 页面不再提供全屏按钮，需要全屏用浏览器 F11 或 OBS 浏览器源即可；
-- 气泡由 Bot 写入，例如：
-  - 帮主人查资料
-  - 我去逛一下抖音
-  - 在整理今天的账单
-  - 在电脑前写报告
-
-Bot 工具：
-
-```text
-house_activity(activity, ttl_seconds)   写底部气泡
-house_work_start(activity)              派桌宠去电脑，走到之后才返回，再开始实际操作
-house_work_ping(activity)               长任务续期，避免一分钟自动休息
-house_work_end()                        任务结束，到电脑后歇一分钟再回休息
-```
-
-也可以手动：
-
-```text
-/小屋 说 帮主人查资料
-/小屋 干活 我去逛一下抖音
-/小屋 干完
-```
-
-或在面板「活动气泡」里直接发送。
-
-## 六、手动触发
-
-聊天：
-
-```text
-/小屋            查看状态
-/小屋 干活       去电脑
-/小屋 休息       回休息
-/小屋 回消息     触发一次拿手机
-```
-
-HTTP：
-
-```http
-POST /api/v1/plugins/extensions/astrbot_plugin_fish_house/event
-{"action": "reply"}
-{"action": "work_start"}
-{"action": "work_end"}
-{"action": "rest"}
-{"action": "bubble", "text": "帮主人查资料"}
-```
-
-需要 AstrBot 面板的 Authorization / API Key。公共页只读 `state.json`，不需要登录。
-
-### 给机器人调用
-
-在 AstrBot 的 API Key 页面创建一个 Key，然后：
-
-```bash
-curl -X POST "http://服务器:6185/api/v1/plugins/extensions/astrbot_plugin_fish_house/event" \
-  -H "Authorization: Bearer <API Key>" \
-  -H "Content-Type: application/json" \
-  -d '{"action":"work_start"}'
-```
-
-任务结束：
-
-```bash
-curl ... -d '{"action":"work_end"}'
-```
-
-```text
-reply      回消息（手机动画）
-work_start 去电脑（任何任务）
-work_end   干完回休息
-rest       强制回休息
-```
-
-桌宠现在默认和 Bot 接在一起；上面的 HTTP 接口保留给外部任务或手动触发。
-
-## 七、配置
+插件配置面板只保留一个开关：
 
 | 配置 | 默认 | 说明 |
 | --- | --- | --- |
-| `enabled` | true | 启用插件 |
-| `public_prefix` | fish_house | 公共链接路径 |
-| `crossfade_ms` | 400 | 叠化毫秒 |
-| `trigger_on_reply` | true | Bot 发消息时触发手机 |
-| `auto_reply` | true | Bot 发消息时自动播放手机动画（可关闭，完全由接口驱动） |
-| `idle_seconds` | 60 | 一轮活结束后，空闲多久回休息；工具执行期间暂停计时 |
-| `max_work_seconds` | 1800 | 连续干活安全上限，超过强制回休息 |
-| `max_upload_mb` | 200 | 单视频上传上限 |
+| 只反馈管理员的对话 | 关闭 | 开启后，非管理员消息不会触发桌宠动作、回复延迟和动画 |
 
-面板里的叠化设置会写入 `data/plugin_data/astrbot_plugin_fish_house/config.json`。
+---
 
-## 八、自动备份
+## v2.0.0 正式版亮点
 
-每次以下操作前，插件会自动把 `config.json`、`state.json` 和全部视频复制到：
+- 版本号正式进入 **2.0.0**；
+- 内置当前「大肥鱼的小屋」默认主题（7 个素材、画布、封面）；
+- 首次安装自动应用默认主题，之后不会覆盖用户修改；
+- 项目制主题编辑，素材/画布按项目隔离；
+- 循环等待节点双轨布局；
+- 主题封面、市场点赞/收藏/下载量；
+- 市场搜索分页、上传项目、更新已发布主题；
+- 登录状态持久化到插件后端；
+- 配置面板精简为管理员过滤开关；
+- Vue 3 + Element Plus 面板，统一暖纸/青灰主题。
 
-```text
-data/plugin_data/astrbot_plugin_fish_house/backups/<时间>-<原因>/
-```
+---
 
-- 插件重载/更新前：`before-update`
-- 替换某个槽位视频前：`before-replace-<slot>`
-- 清空某个槽位前：`before-clear-<slot>`
-- 恢复备份前：`before-restore`
+## 安装
 
-只保留最近 20 个备份。面板「备份与恢复」可以选一个备份直接还原槽位和视频。内置默认视频和 `assets/videos/` 里的一致，不会重复塞进备份。
+### 环境要求
 
-> 更新插件本身不会碰 `plugin_data`；真正会丢数据的是清空槽位或手动删除 `videos/`。现在清空槽位也会先备份。
+- AstrBot >= 4.9.0（实测 4.29.3）；
+- Python 3.10+；
+- 能正常访问 AstrBot 的插件页面和公共静态目录。
 
-## 九、数据与公共文件
+### 通过 zip 安装
 
-```text
-data/plugin_data/astrbot_plugin_fish_house/
-  config.json      槽位与设置
-  state.json       当前状态（含模式、气泡、时间戳）
-  videos/          上传的视频
-  uploads/         临时上传分片
-
-astrbot/dashboard/dist/fish_house/
-  index.html
-  app.js
-  style.css
-  config.json      公共页读取
-  state.json       公共页轮询
-  videos/          公共视频
-```
-
-修改视频或设置后会自动同步；也可以在面板点“重新同步公共页”。
-
-## 十一、导出插件
-
-面板「导出插件」会生成：
+1. 在 AstrBot 管理面板进入「插件」；
+2. 上传 `astrbot_plugin_fish_house.zip`，或解压到：
 
 ```text
-/fish_house/astrbot_plugin_fish_house.zip
+AstrBot/data/plugins/astrbot_plugin_fish_house/
 ```
 
-zip 内是 `astrbot_plugin_fish_house/` 源码目录，包含插件代码、配置 schema、面板和公共页；**不包含**上传的视频、用户配置和备份。拿到别的 AstrBot 后解压到 `data/plugins/` 并重载即可。
+3. 重启 AstrBot；
+4. 打开插件页面。
 
-## 十二、注意
+插件包已带默认主题和前端静态文件，不需要再构建前端。
 
-- 公共页每段视频可在面板单独勾选「播放有声」，改完约 8 秒内公共页自动生效，不用刷新；
-- 浏览器自动播放：公共页打开就自动播放；默认带声音，被浏览器拦下时先静音播，点右上角喇叭开声音；
-- 视频衔接：新片段叠在旧片段上面淡入，旧片段保持不透明垫底，不会闪白/闪黑；
-- 公共页默认透明背景，适合 OBS 浏览器源；
-- 视频不要并行播放，否则首尾帧会错乱；
-- 如果 AstrBot 更新覆盖了 `dashboard/dist`，重载插件即可重新同步；
-- 需要用 `http://服务器:6185/fish_house/index.html` 访问，不要加 `/api` 前缀。
+首次启动会安装并应用「大肥鱼的小屋」。如果已有数据目录，则保留原配置，不会强制替换。
 
+### 从源码安装
+
+```bash
+cd AstrBot/data/plugins
+git clone https://github.com/jiuchai/fish-house.git astrbot_plugin_fish_house
+```
+
+重启 AstrBot。源码方式同样不需要构建前端，Vue / Element Plus 已放在 `pages/panel/vendor/`。
+
+---
+
+## 快速开始
+
+1. 打开 AstrBot 管理面板 → 插件 → 大肥鱼的小屋；
+2. 首次进入会看到默认主题和 7 个素材；
+3. 首页点「复制」拿到壁纸链接；
+4. 把链接放进 OBS 浏览器源，或直接在浏览器打开；
+5. 想改主题：进入「项目」，编辑素材/封面/画布，点「保存信息」；
+6. 确认效果后点「应用为桌宠」；
+7. 想发布：进入「市场」，登录后点「上传 / 更新」。
+
+---
+
+## 目录结构
+
+```text
+astrbot_plugin_fish_house/
+├─ main.py                 # 插件主程序、状态机、Web API
+├─ theme_store.py          # 主题包构建/安装
+├─ metadata.yaml
+├─ _conf_schema.json       # 插件配置（仅管理员过滤开关）
+├─ README.md
+├─ LICENSE
+├─ assets/
+│  ├─ default_theme.fishtheme   # 内置默认主题
+│  └─ videos/                   # 内置默认视频
+├─ pages/panel/            # Vue 3 管理面板
+│  ├─ index.html
+│  ├─ style.css
+│  ├─ vue/
+│  └─ vendor/
+└─ web/live/               # 独立壁纸页面
+```
+
+运行数据在：
+
+```text
+AstrBot/data/plugin_data/astrbot_plugin_fish_house/
+├─ config.json
+├─ videos/
+├─ themes/
+├─ backups/
+└─ market_sessions.json
+```
+
+升级前建议备份整个数据目录。
+
+---
+
+## 主题包格式
+
+`.fishtheme` 是一个 zip：
+
+```text
+theme.json
+videos/*.mp4
+cover.jpg | cover.png | cover.webp
+```
+
+`theme.json` 包含：
+
+- `meta`：名称、作者、版本、介绍、封面；
+- `config.actions`：动作列表；
+- `config.videos`：7 个槽位视频；
+- `config.audio` / `durations`；
+- `config.library`：素材库；
+- `config.flow`：画布节点和连线；
+- `config.settings`：叠化等设置。
+
+导入时会复制主题视频并重映射素材 ID，不会覆盖原文件。
+
+---
+
+## LLM 工具与命令
+
+插件会向 LLM 暴露以下工具：
+
+| 工具 | 用途 |
+| --- | --- |
+| `house_work_start` | 开始电脑任务，等桌宠走到电脑后返回 |
+| `house_work_end` | 电脑任务结束，回休息 |
+| `house_work_ping` | 长任务续期 |
+| `house_activity` | 设置活动气泡 |
+| `house_play_action` | 播放自定义动作 |
+| `house_flow_goto` | 按画布节点切换 |
+
+命令：
+
+```text
+/小屋
+/桌宠
+```
+
+支持查看状态、手动切换动作、回休息等。
+
+---
+
+## 常见问题
+
+### 视频不透明？
+
+MP4 不支持透明背景。需要透明桌宠请导入带 alpha 的 **WebM**。
+
+### 浏览器没有声音？
+
+浏览器会拦截带声自动播放。页面会先回退静音，右上角提供声音按钮，点一下即可恢复。
+
+### 面板改了没生效？
+
+静态文件更新后需要 **Ctrl+F5** 强刷；插件 Python 代码/路由变更需要重启 AstrBot。
+
+### 刷新后要重新登录市场？
+
+v2.0.0 起登录 token 存在插件后端，按 AstrBot 用户名恢复，刷新不需要重新登录。如果换了市场地址，旧服务器 token 会自动失效，需要重新登录。
+
+### 默认主题没有出现？
+
+只有首次安装（数据目录为空、`defaults_applied=0`）才会自动应用默认主题。覆盖安装会保留原数据。
+
+### 主题市场连不上？
+
+检查：
+
+1. 设置页市场地址是否为 `https://shop.swellengine.com/`；
+2. 服务器是否已部署、HTTPS 证书是否有效；
+3. 地址必须以 `http://` 或 `https://` 开头。
+
+---
+
+## 安全说明
+
+- 主题市场密码使用 PBKDF2-SHA256 存储；
+- token 只存 SHA-256 哈希，30 天过期；
+- 上传会校验 zip 路径、文件白名单和体积；
+- 公网部署务必使用 HTTPS、反向代理和限流；
+- 插件页运行在 AstrBot sandbox iframe 中，不直接使用 cookie / localStorage 存敏感状态。
+
+---
+
+## 开发
+
+```bash
+# 主题市场服务端
+cd fish-house-theme-server
+python -m pip install -r requirements.txt
+python app.py
+
+# Docker
+docker compose up -d --build
+```
+
+面板前端是纯静态 Vue 3：
+
+- 无需构建；
+- Vue / Element Plus 在 `pages/panel/vendor/`；
+- 修改后同步提升 `?v=` 版本号；
+- 浏览器强刷生效。
+
+---
+
+## License
+
+MIT License © 2026 jiuchai

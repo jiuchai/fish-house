@@ -1,4 +1,4 @@
-﻿name: astrbot_plugin_fish_house
+name: astrbot_plugin_fish_house
 display_name: 大肥鱼的小屋
 short_desc: 会休息、拿手机、去电脑的视频桌宠，WebUI 导入视频，独立链接观看
 desc: |
@@ -9,11 +9,16 @@ desc: |
   - 干活时先去电脑，走到电脑旁边后才开始执行实际操作；
   - 干完活从电脑回到休息，所有片段顺序播放；
   - 片段之间叠化衔接，播完一个才播下一个；
-  - 内置 7 段默认视频，装好就能看，默认带声音；面板可逐段选择哪段出声；
+  - 素材库 + 动作画布：视频统一上传到素材库，画布节点只挑素材；
+  - Vue 3 面板：首页/项目/市场/我的/设置五个 Tab；
+  - 循环等待节点：固定在画布左右两侧、同步纵向位置，默认连到收到消息；
+  - 主题项目：每个项目独立素材与画布，可复制/保存/应用；
+  - 主题：整套配置可导出/导入/应用，自带主题市场（FastAPI 服务端）；
+  - 动作可扩展：面板里随时新增动作，自动出现在流程图中；
   - WebUI 导入/替换 7 段视频，带状态预览和手动触发；
   - 提供独立公共链接，不需要登录 AstrBot 面板也能看桌宠。
-version: 1.9.2
-author: dafeiyu
+version: 2.0.0
+author: jiuchai
 astrbot_version: ">=4.9.0"
 support_platforms:
   - aiocqhttp
@@ -25,4 +30,3 @@ tags:
   - pet
   - video
   - webui
-

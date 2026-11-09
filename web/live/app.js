@@ -22,6 +22,7 @@
   let pendingAfterPhone = "";
   let pollBusy = false;
   let timerId = null;
+  let currentFlowNode = "";
   let soundOn = true;
   let soundBlocked = false;
   let soundHintTimer = null;
@@ -291,6 +292,7 @@
   }
 
   async function runRest() {
+    currentFlowNode = "";
     currentMode = "rest";
     setEmpty(!srcFor("rest"), "还没有导入休息视频，先去插件面板导入吧");
     if (!srcFor("rest")) return;
@@ -380,10 +382,71 @@
     setStatus("忙完啦，回窝里歇着");
   }
 
+  function actionLabel(key) {
+    const item = (config.actions || []).find((row) => row.key === key);
+    return item ? item.label || key : key;
+  }
+
+  async function playCustomAction(key, loop) {
+    if (!key) {
+      await runRest();
+      return;
+    }
+    if (!srcFor(key)) {
+      // 刚在面板/接口里加的动作，页面配置可能还没轮询到，先拉一次。
+      await refreshConfig();
+    }
+    if (!srcFor(key)) {
+      await runRest();
+      return;
+    }
+    const my = ++token;
+    cancelPendingOnce();
+    currentMode = "action";
+    setStatus(actionLabel(key));
+    if (loop) {
+      await playLoop(key);
+      return;
+    }
+    await playOnce(key);
+    if (my !== token) return;
+    await runRest();
+  }
+
+  async function playFlowNode(state) {
+    const video = String(state.node_video || "");
+    if (!video) {
+      await runRest();
+      return;
+    }
+    const my = ++token;
+    cancelPendingOnce();
+    currentMode = "flow";
+    currentFlowNode = String(state.node_id || "");
+    setStatus(String(state.node_label || "动作"));
+    videos.__flow__ = video;
+    const loop = Boolean(state.node_loop);
+    const ok = await playClip("__flow__", { loop });
+    if (!ok) {
+      await runRest();
+      return;
+    }
+    // 一次性节点：停在这里等插件按流程图切下一个节点（多出边时等模型选择）。
+    if (my !== token) return;
+  }
+
   function handleInitial(state) {
     renderBubble(state);
     currentMode = state.mode || "rest";
     pendingAfterPhone = String(state.after_phone || "");
+    if (state.mode === "action") {
+      void playCustomAction(String(state.action_key || ""), Boolean(state.action_loop));
+      return;
+    }
+    if (state.mode === "flow") {
+      void playFlowNode(state);
+      return;
+    }
     if (state.mode === "computer") {
       currentMode = "computer";
       if (state.auto_work && srcFor("computer_loop")) {
@@ -424,7 +487,15 @@
       if (seq === lastSeq) return;
       lastSeq = seq;
       const mode = state.mode || "rest";
-      if (mode === "rest") {
+      if (mode === "action") {
+        pendingAfterPhone = "";
+        void playCustomAction(String(state.action_key || ""), Boolean(state.action_loop));
+      } else if (mode === "flow") {
+        pendingAfterPhone = "";
+        if (currentFlowNode !== String(state.node_id || "")) {
+          void playFlowNode(state);
+        }
+      } else if (mode === "rest") {
         pendingAfterPhone = "";
         if (currentMode === "computer") void endWork();
         else if (currentMode === "phone") void finishPhone();
@@ -472,6 +543,7 @@
       const data = await fetchJson(`./config.json?t=${Date.now()}`);
       videos = data.videos || videos;
       slotAudio = data.audio || {};
+      config.actions = data.actions || config.actions;
       const nextFade = Math.max(0, Number(data.crossfade_ms || 400));
       if (nextFade !== crossfade) {
         crossfade = nextFade;

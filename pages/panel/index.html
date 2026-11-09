@@ -2,126 +2,361 @@
 <html lang="zh-CN">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>大肥鱼的小屋</title>
-  <link rel="stylesheet" href="./style.css?v=1.8.0" />
-  <!-- 必须在 app.js 之前加载：AstrBot 的插件页在 sandbox iframe 里没有 allow-same-origin，
-       页面只能通过这个桥接访问插件接口。 -->
   <script src="/api/plugin/page/bridge-sdk.js"></script>
+  <link rel="stylesheet" href="./vendor/element-plus.css" />
+  <link rel="stylesheet" href="./style.css?v=2.0.0" />
 </head>
 <body>
-  <header class="topbar">
-    <div>
-      <h1>大肥鱼的小屋</h1>
-      <p class="sub">休息、手机、电脑三段式视频桌宠 · 片段顺序播放 · 叠化衔接</p>
-    </div>
-    <div class="state-box">
-      <span id="statePill" class="pill">休息</span>
-      <span id="stateText" class="muted">正在读取…</span>
-    </div>
-  </header>
-
-  <div id="apiError" class="api-error hidden"></div>
-
-  <section class="section-head">
-    <div>
-      <h2>内置了 7 段默认视频</h2>
-      <p class="muted">装好就能看；想换素材就点槽位里的“上传视频”或“用地址”替换，进度条走完会自动按视频长度衔接。</p>
-    </div>
-    <div class="legend">
-      <span>休息 → 拿手机 → 玩手机 → 放手机 → 去电脑 → 玩电脑 → 回休息</span>
-    </div>
-  </section>
-
-  <section id="slots" class="slot-grid"></section>
-
-  <section class="card hero">
-    <div class="hero-copy">
-      <h2>独立桌宠链接</h2>
-      <p class="muted">把链接拖进 OBS 浏览器源，或直接用浏览器打开。页面不需要登录 AstrBot 面板。</p>
-      <div class="link-row">
-        <input id="publicUrl" readonly />
-        <button id="copyLink" class="btn primary" type="button">复制链接</button>
-        <button id="openLink" class="btn" type="button">打开</button>
+  <div id="app" v-cloak>
+    <header class="app-header">
+      <div class="brand">
+        <div class="brand-mark">鱼</div>
+        <div>
+          <h1>大肥鱼的小屋</h1>
+          <p>视频桌宠 · 素材、画布与主题市场</p>
+        </div>
       </div>
-      <p id="publicHint" class="hint"></p>
-    </div>
-    <div class="hero-actions">
-      <button class="btn warm" data-action="reply" type="button">回消息</button>
-      <button class="btn cool" data-action="work_start" type="button">去电脑干活</button>
-      <button class="btn" data-action="work_end" type="button">干完回休息</button>
-      <button class="btn ghost" data-action="rest" type="button">强制休息</button>
-    </div>
-  </section>
+      <div class="header-right">
+        <span class="status-pill" :class="'mode-' + (state.mode || 'rest')">
+          <i></i>{{ modeLabel(state.mode) }}
+        </span>
+        <button v-if="!market.token" class="btn small" type="button" @click="openAuth('login')">登录</button>
+        <span v-else class="user-pill" @click="tab = 'my'">{{ market.user }}</span>
+        <button class="icon-btn" type="button" title="刷新" @click="load" :disabled="loading">⟳</button>
+        <span class="version">v{{ overview?.version || '—' }}</span>
+      </div>
+    </header>
 
-  <section class="card">
-    <h2>导出插件</h2>
-    <p class="muted">把当前插件源码、面板和公共页打成一个 zip，可以拿到别的 AstrBot 里安装。不会包含你上传的视频、配置和备份。</p>
-    <div class="row">
-      <a id="exportPlugin" class="btn primary" href="#" download>下载插件 zip</a>
-      <span id="exportHint" class="hint">正在准备…</span>
-    </div>
-  </section>
+    <nav class="tabs" aria-label="面板导航">
+      <button v-for="item in tabs" :key="item.key" type="button"
+        class="tab" :class="{ active: tab === item.key }" @click="tab = item.key">
+        <span v-html="item.icon"></span>{{ item.label }}
+      </button>
+    </nav>
 
-  <section class="card bubble-card">
-    <div class="section-head compact">
-      <div>
-        <h2>活动气泡</h2>
-        <p class="muted">显示在公共桌宠底部，例如「帮主人查资料」「我去逛一下抖音」。Bot 也可以自己调用 house_activity 写入。</p>
+    <div v-if="error" class="banner error">
+      <b>接口请求失败：</b>{{ error }}
+      <button class="btn ghost small" type="button" @click="load">重试</button>
+    </div>
+
+    <main v-if="overview" class="content">
+      <!-- 概览 -->
+      <section v-show="tab === 'overview'" class="tab-page">
+        <div class="hero-card" :class="{ 'has-cover': activeTheme && activeTheme.cover_url }" :style="heroStyle">
+          <div class="hero-theme">
+            <p class="eyebrow">CURRENT THEME</p>
+            <h2>{{ activeTheme?.name || overview.theme_meta.name || '我的主题' }}</h2>
+            <p class="hero-sub">{{ activeTheme?.description || overview.theme_meta.description || '还没有写主题介绍。' }}</p>
+            <div class="hero-meta">
+              <span>{{ activeTheme?.author || overview.theme_meta.author || '匿名作者' }}</span>
+              <span>v{{ activeTheme?.version || overview.theme_meta.version || '1.0.0' }}</span>
+              <span class="hero-status">当前：{{ modeLabel(state.mode) }}</span>
+            </div>
+          </div>
+          <div class="hero-stats">
+            <div><b>{{ overview.library.length }}</b><span>素材</span></div>
+            <div><b>{{ overview.actions.length }}</b><span>动作</span></div>
+            <div><b>{{ overview.flow.nodes.length }}</b><span>节点</span></div>
+            <div><b>{{ overview.themes.length }}</b><span>主题</span></div>
+          </div>
+        </div>
+
+        <section class="card home-flow">
+          <div class="card-head"><h3>当前画布</h3><button class="btn ghost small" type="button" @click="tab = 'project'">编辑项目</button></div>
+          <canvas-panel readonly :flow="overview.flow" :state="state" :library="overview.library" :toast="toast" :confirm="confirm"></canvas-panel>
+        </section>
+
+        <div class="two-col">
+          <section class="card">
+            <div class="card-head"><h3>壁纸链接</h3><span class="tag" :class="overview.public_ready ? 'good' : 'warn'">{{ overview.public_ready ? '已同步' : '未同步' }}</span></div>
+            <div class="input-row">
+              <input :value="publicUrl" readonly />
+              <button class="btn" type="button" @click="copy(publicUrl)">复制</button>
+            </div>
+          </section>
+
+          <section class="card">
+            <div class="card-head"><h3>当前主题</h3><button class="btn ghost small" type="button" @click="tab = 'themes'">管理</button></div>
+            <p class="theme-inline-title">{{ overview.theme_meta.name || '我的主题' }}</p>
+            <p class="muted">{{ overview.theme_meta.description || '还没有写主题介绍。' }}</p>
+            <div class="meta-line">
+              <span>{{ overview.theme_meta.author || '匿名作者' }}</span>
+              <span>v{{ overview.theme_meta.version || '1.0.0' }}</span>
+            </div>
+          </section>
+        </div>
+
+
+      </section>
+
+      <!-- 主题 -->
+      <section v-show="tab === 'themes'" class="tab-page">
+        <div class="page-head">
+          <div><h2>主题</h2><p class="muted">本地主题库；编辑会进入项目页，应用会覆盖当前桌宠配置。</p></div>
+          <div class="head-actions">
+            <label class="btn">导入主题<input type="file" accept=".fishtheme,.zip" hidden @change="onThemeImport" /></label>
+            <button class="btn" type="button" @click="tab = 'project'; createProject(false)">新建主题</button>
+          </div>
+        </div>
+        <div class="theme-grid" v-if="overview.themes.length">
+          <theme-card v-for="item in overview.themes" :key="item.id" :item="item"
+            @apply="applyTheme" @remove="deleteTheme" @edit="openThemeProject"></theme-card>
+        </div>
+        <div v-else class="empty">还没有主题，点「新建主题」或从市场下载。</div>
+      </section>
+
+      <!-- 市场 -->
+      <section v-show="tab === 'market'" class="tab-page">
+        <div class="page-head">
+          <div><h2>主题市场</h2><p class="muted">浏览、下载并应用别人的主题，或上传自己的配置。</p></div>
+          <div class="head-actions">
+            <button class="btn" type="button" @click="marketSearch()" :disabled="market.busy">刷新</button>
+            <button class="btn primary" type="button" @click="openUploadDialog()" :disabled="market.busy || !market.token">上传 / 更新</button>
+          </div>
+        </div>
+        <section v-if="!market.token" class="card login-cta">
+          <div><b>登录主题市场</b><p class="muted">登录后可上传、点赞、收藏，并查看「我的」。</p></div>
+          <button class="btn primary" type="button" @click="openAuth('login')">登录 / 注册</button>
+        </section>
+        <section class="card market-connect">
+          <div class="input-row">
+            <input v-model="market.query" class="search" placeholder="搜索主题 / 作者" @keyup.enter="marketSearch()" />
+            <button class="btn" type="button" @click="marketSearch()">搜索</button>
+          </div>
+          <div class="market-status">
+            <span :class="{ online: market.token }">{{ market.token ? '已登录：' + market.user : '未登录，下载不需要登录' }}</span>
+            <span v-if="market.message">{{ market.message }}</span>
+          </div>
+        </section>
+        <div class="theme-grid" v-if="market.items.length">
+          <theme-card v-for="item in market.items" :key="item.id" :item="item" market @apply="marketDownload" @remove="marketDelete" @like="toggleLike" @favorite="toggleFavorite" @edit="openMarketEdit" @update="openUploadDialog(item.id)"></theme-card>
+        </div>
+        <div v-else class="empty">{{ market.loaded ? '市场里还没有主题。' : '点「刷新」加载市场。' }}</div>
+        <div class="market-pager" v-if="market.total > 0">
+          <span class="muted">共 {{ market.total }} 个主题</span>
+          <el-pagination background layout="prev, pager, next" :total="market.total"
+            :page-size="market.pageSize" :current-page="market.page" @current-change="goMarketPage"></el-pagination>
+        </div>
+      </section>
+
+      <!-- 项目 -->
+      <section v-show="tab === 'project'" class="tab-page">
+        <div class="page-head">
+          <div><h2>主题项目</h2><p class="muted">每个项目独立保存素材和画布；保存直接覆盖当前项目。</p></div>
+        </div>
+        <div class="project-layout">
+          <div class="project-toolbar">
+            <label>当前项目
+              <el-select v-model="projectId" style="width: 240px" @change="loadProject">
+                <el-option v-for="item in overview.themes" :key="item.id" :label="item.name + (item.id === overview.active_theme_id ? '（当前应用）' : '')" :value="item.id"></el-option>
+              </el-select>
+            </label>
+            <button class="btn" type="button" @click="createProject(false)">新建项目</button>
+            <button class="btn" type="button" @click="createProject(true)" :disabled="!project">复制当前</button>
+            <span class="muted">{{ overview.themes.length }} 个项目</span>
+          </div>
+          <div class="project-main" v-if="project">
+            <div class="project-info">
+              <div class="project-cover">
+                <label class="project-cover-edit">
+                  <img v-if="project.cover_url" :src="project.cover_url" alt="" />
+                  <span v-else class="cover-empty">点击上传封面</span>
+                  <span class="cover-overlay">更换封面</span>
+                  <input type="file" accept="image/jpeg,image/png,image/webp" hidden @change="onProjectCover" />
+                </label>
+                <small>建议 16:10，JPG / PNG / WebP</small>
+              </div>
+              <div class="project-fields">
+                <div class="project-title-row">
+                  <div class="pfield grow"><span>主题名称</span><el-input v-model="projectForm.name" maxlength="60" show-word-limit placeholder="主题名称"></el-input></div>
+                  <div class="pfield"><span>作者</span><el-input v-model="projectForm.author" maxlength="40" placeholder="作者"></el-input></div>
+                  <div class="pfield version"><span>版本</span><el-input v-model="projectForm.version" maxlength="32" placeholder="1.0.0"></el-input></div>
+                </div>
+                <div class="pfield"><span>介绍</span><el-input v-model="projectForm.description" type="textarea" :rows="2" maxlength="2000" show-word-limit placeholder="这个主题适合什么场景、包含哪些动作"></el-input></div>
+                <div class="project-actions">
+                  <span class="muted">保存只写入项目，点「应用为桌宠」才会覆盖线上</span>
+                  <div class="head-actions">
+                    <button class="btn" type="button" @click="saveProjectMeta">保存信息</button>
+                    <button class="btn" type="button" @click="exportProject">导出项目</button>
+                    <button class="btn primary" type="button" @click="applyProject">应用为桌宠</button>
+                    <button class="btn danger" type="button" @click="deleteProject">删除项目</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="section-title"><h3>项目素材</h3><label class="btn">上传素材<input type="file" multiple accept="video/mp4,video/webm,video/quicktime,.mp4,.webm,.mov,.m4v" hidden @change="onProjectAsset" /></label></div>
+            <div class="project-assets" v-if="projectAssets.length">
+              <div v-for="item in projectAssets" :key="item.id" class="project-asset">
+                <video :src="projectMediaUrl(item.video)" muted playsinline preload="metadata"></video>
+                <b>{{ item.name }}</b>
+                <small>{{ fmtDuration(item.duration) }}</small>
+                <button class="btn small danger" type="button" @click="deleteProjectAsset(item)">删除</button>
+              </div>
+            </div>
+            <div v-else class="empty">这个项目还没有素材。</div>
+            <div class="section-title"><h3>项目画布</h3><span class="muted">保存只覆盖当前项目，点「应用为桌宠」才会生效</span></div>
+            <canvas-panel ref="projectCanvas" :key="projectId" :flow="projectFlow" :state="state" :library="projectAssets" :toast="toast" :confirm="confirm"
+              :project-mode="true" @save-project="saveProjectFlow"></canvas-panel>
+          </div>
+        </div>
+      </section>
+
+      <!-- 我的 -->
+      <section v-show="tab === 'my'" class="tab-page">
+        <div class="page-head"><div><h2>我的</h2><p class="muted">发布过的、收藏和点赞的主题。</p></div></div>
+        <section v-if="!market.token" class="card login-cta">
+          <div><b>还没有登录</b><p class="muted">登录后可以查看你发布的主题、收藏和点赞。</p></div>
+          <button class="btn primary" type="button" @click="openAuth('login')">登录 / 注册</button>
+        </section>
+        <template v-else>
+          <section class="card profile-card">
+            <div><b>{{ market.user }}</b><p class="muted">已登录主题市场</p></div>
+            <button class="btn ghost small" type="button" @click="logout">退出</button>
+          </section>
+          <div class="my-tabs">
+            <button type="button" :class="{ active: myKind === 'published' }" @click="myKind = 'published'; loadMy()">我发布的</button>
+            <button type="button" :class="{ active: myKind === 'favorites' }" @click="myKind = 'favorites'; loadMy()">收藏</button>
+            <button type="button" :class="{ active: myKind === 'likes' }" @click="myKind = 'likes'; loadMy()">点赞</button>
+          </div>
+          <div class="theme-grid" v-if="myItems.length">
+            <theme-card v-for="item in myItems" :key="item.id" :item="item" market
+              :show-actions="myKind === 'published'" @apply="marketDownload" @remove="marketDelete"
+              @like="toggleLike" @favorite="toggleFavorite" @edit="openMarketEdit" @update="openUploadDialog(item.id)"></theme-card>
+          </div>
+          <div v-else class="empty">这里还没有内容。</div>
+        </template>
+      </section>
+
+      <!-- 设置 -->
+      <section v-show="tab === 'settings'" class="tab-page">
+        <div class="page-head"><div><h2>设置</h2><p class="muted">播放、活动气泡和主题市场。</p></div></div>
+        <div class="two-col settings-top">
+          <section class="card settings-card">
+            <div class="card-head"><h3>播放</h3></div>
+            <div class="form-grid one">
+              <label>叠化时长（毫秒）<input v-model.number="settingsForm.crossfade_ms" type="number" min="0" max="2000" step="50" /></label>
+              <label class="mini-check"><input v-model="settingsForm.auto_reply" type="checkbox" /> 自动播放回消息动画</label>
+            </div>
+            <div class="settings-actions"><button class="btn primary" type="button" @click="saveSettings">保存设置</button></div>
+          </section>
+          <section class="card settings-card">
+            <div class="card-head"><h3>活动气泡</h3></div>
+            <p class="muted">显示在公共桌宠底部，例如「帮主人查资料」。</p>
+            <div class="input-row"><input v-model="bubbleText" placeholder="帮主人查资料" @keyup.enter="sendBubble" /><button class="btn warm" type="button" @click="sendBubble">发送</button><button class="btn" type="button" @click="clearBubble">清空</button></div>
+            <div class="quick-bubbles">
+              <button v-for="text in ['帮主人查资料', '正在干活，稍等', '准备休息啦']" :key="text" class="quick-bubble" type="button" @click="bubbleText = text">{{ text }}</button>
+            </div>
+          </section>
+        </div>
+        <section class="card">
+          <div class="card-head"><h3>主题市场</h3><span class="muted">登录、下载、上传都使用这个地址</span></div>
+          <div class="input-row">
+            <input v-model="market.url" placeholder="https://shop.swellengine.com/" @change="saveMarketUrl" />
+            <button class="btn" type="button" @click="saveMarketUrl">保存地址</button>
+          </div>
+          <p class="muted" style="margin-top:8px">发布时改成公网 HTTPS 地址，例如 https://market.example.com。</p>
+        </section>
+      </section>
+    </main>
+
+    <div v-else-if="loading" class="loading"><span class="spinner"></span>正在读取插件数据…</div>
+
+    <footer class="footer">© 2026 大肥鱼的小屋 · jiuchai · v{{ overview?.version || '' }}</footer>
+
+    <div v-if="toastData.show" class="toast" :class="toastData.type">{{ toastData.text }}</div>
+
+    <div v-if="preview" class="modal preview-modal" @click.self="preview = null">
+      <div class="preview-box">
+        <button class="modal-close" type="button" @click="preview = null">×</button>
+        <video :src="mediaUrl(preview.video)" controls autoplay playsinline></video>
+        <div class="preview-meta"><b>{{ preview.name }}</b><span>{{ fmtDuration(preview.duration) }}</span></div>
       </div>
     </div>
-    <div class="bubble-row">
-      <input id="bubbleText" maxlength="120" placeholder="帮主人查资料" />
-      <button id="sendBubble" class="btn warm" type="button">发送气泡</button>
-      <button id="clearBubble" class="btn ghost" type="button">清空</button>
-    </div>
-  </section>
 
-  <section class="card">
-    <h2>备份与恢复</h2>
-    <p class="muted">更新插件、替换视频或清空槽位前，会自动把配置和视频备份到插件数据目录的 <code>backups/</code>。恢复时会把备份里的视频和槽位配置一起还原。</p>
-    <div class="bubble-row">
-      <select id="backupSelect" class="backup-select"><option value="">还没有备份</option></select>
-      <button id="restoreBackup" class="btn danger" type="button">恢复选中的备份</button>
-    </div>
-    <p id="backupHint" class="hint">正在读取备份…</p>
-  </section>
-
-  <section class="card settings">
-    <div class="section-head compact">
-      <div>
-        <h2>播放设置</h2>
-        <p class="muted">叠化和显示大小。</p>
+    <div v-if="uploadDialog.show" class="modal" @click.self="uploadDialog.show = false">
+      <div class="dialog market-upload-dialog">
+        <h3>上传到市场</h3>
+        <label class="pfield"><span>选择项目</span>
+          <el-select v-model="uploadDialog.projectId" style="width: 100%">
+            <el-option v-for="item in overview.themes" :key="item.id" :label="item.name" :value="item.id"></el-option>
+          </el-select>
+        </label>
+        <label class="pfield"><span>上传方式</span>
+          <el-select v-model="uploadDialog.targetId" style="width: 100%">
+            <el-option label="新建一个市场主题" value="new"></el-option>
+            <el-option v-for="item in myPublished" :key="item.id" :label="'更新已有：' + item.name" :value="item.id"></el-option>
+          </el-select>
+        </label>
+        <p class="muted">更新已有主题会覆盖它的主题包，点赞、收藏和下载数会保留。</p>
+        <div class="dialog-actions">
+          <button class="btn" type="button" @click="uploadDialog.show = false">取消</button>
+          <button class="btn primary" type="button" :disabled="uploadDialog.busy" @click="marketUpload">{{ uploadDialog.targetId !== 'new' ? '更新主题包' : '上传新主题' }}</button>
+        </div>
       </div>
     </div>
-    <div class="form-grid">
-      <label>叠化时长（毫秒）<input id="crossfade" type="number" min="0" max="3000" step="50" /></label>
-      <label class="check-line"><input id="autoReply" type="checkbox" /> 自动播放回消息动画</label>
-    </div>
-    <div class="settings-actions">
-      <button id="saveSettings" class="btn primary" type="button">保存设置</button>
-      <button id="refreshSync" class="btn ghost" type="button">重新同步公共页</button>
-    </div>
-  </section>
 
-  <section class="card api-card">
-    <div class="section-head compact">
-      <div>
-        <h2>机器人接口</h2>
-        <p class="muted">机器人也可以直接调用接口：任何任务开始/结束都能控制电脑动画，还能写底部活动气泡。请求需要 AstrBot API Key。</p>
+    <div v-if="editDialog.show" class="modal" @click.self="editDialog.show = false">
+      <div class="dialog market-edit-dialog">
+        <h3>编辑市场信息</h3>
+        <label class="pfield"><span>主题名称</span><input v-model="editDialog.name" maxlength="60" /></label>
+        <label class="pfield"><span>版本</span><input v-model="editDialog.version" maxlength="32" /></label>
+        <label class="pfield"><span>介绍</span><textarea v-model="editDialog.description" rows="3" maxlength="2000"></textarea></label>
+        <div class="dialog-actions">
+          <button class="btn" type="button" @click="editDialog.show = false">取消</button>
+          <button class="btn primary" type="button" :disabled="editDialog.busy" @click="saveMarketInfo">保存</button>
+        </div>
       </div>
     </div>
-    <div class="api-row">
-      <code id="apiEndpoint"></code>
-      <button id="copyApi" class="btn small" type="button">复制</button>
+
+    <div v-if="auth.show" class="modal" @click.self="auth.show = false">
+      <div class="dialog auth-modal">
+        <h3>主题市场账号</h3>
+        <div class="auth-tabs">
+          <button type="button" :class="{ active: auth.mode === 'login' }" @click="auth.mode = 'login'">登录</button>
+          <button type="button" :class="{ active: auth.mode === 'register' }" @click="auth.mode = 'register'">注册</button>
+        </div>
+        <input v-model="auth.email" v-if="auth.mode === 'register'" type="email" placeholder="邮箱（唯一 ID）" autocomplete="email" />
+        <input v-model="auth.username" :placeholder="auth.mode === 'login' ? '用户名或邮箱' : '用户名'" autocomplete="username" />
+        <input v-model="auth.password" type="password" placeholder="密码" autocomplete="current-password" @keyup.enter="submitAuth" />
+        <p v-if="auth.error" class="auth-error">{{ auth.error }}</p>
+        <div class="dialog-actions">
+          <button class="btn" type="button" @click="auth.show = false">取消</button>
+          <button class="btn primary" type="button" :disabled="auth.busy" @click="submitAuth">{{ auth.mode === 'login' ? '登录' : '注册' }}</button>
+        </div>
+      </div>
     </div>
-    <pre id="apiExample" class="api-example"></pre>
-    <p class="hint">在 AstrBot 的 API Key 页面创建一个 Key，放到 Authorization: Bearer 后面。动作：reply / work_start / work_end / rest / bubble。</p>
-  </section>
 
-  <p class="footer">大肥鱼的小屋 · 视频按顺序播放，不并行抢帧</p>
+    <div v-if="conflict.show" class="modal" @click.self="conflict.show = false">
+      <div class="dialog">
+        <h3>主题已存在</h3>
+        <p>本地已有「{{ conflict.existing?.name }}」。下载「{{ conflict.incoming?.name }}」要怎么处理？</p>
+        <div class="dialog-actions">
+          <button class="btn" type="button" @click="resolveConflict('cancel')">取消</button>
+          <button class="btn" type="button" @click="resolveConflict('rename')">重命名</button>
+          <button class="btn danger" type="button" @click="resolveConflict('overwrite')">覆盖</button>
+        </div>
+      </div>
+    </div>
 
-  <div id="toast" class="toast" role="status"></div>
-  <script src="./app.js?v=1.8.0"></script>
+    <div v-if="dialog.show" class="modal" @click.self="dialogCancel">
+      <div class="dialog">
+        <h3>{{ dialog.title }}</h3>
+        <p>{{ dialog.text }}</p>
+        <input v-if="dialog.mode === 'prompt'" v-model="dialog.value" @keyup.enter="dialogOk" />
+        <div class="dialog-actions">
+          <button class="btn" type="button" @click="dialogCancel">取消</button>
+          <button class="btn" :class="dialog.danger ? 'danger' : 'primary'" type="button" @click="dialogOk">确定</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="./vendor/vue.global.prod.js"></script>
+  <script src="./vendor/element-plus.full.min.js"></script>
+  <script src="./vue/theme-card.js?v=2.0.0"></script>
+  <script src="./vue/canvas.js?v=2.0.0"></script>
+  <script src="./vue/app.js?v=2.0.0"></script>
 </body>
 </html>

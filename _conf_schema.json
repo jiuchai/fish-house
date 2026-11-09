@@ -1,66 +1,8 @@
 {
-    "enabled": {
-        "description": "启用大肥鱼的小屋",
+    "admin_only": {
+        "description": "只反馈管理员的对话",
         "type": "bool",
-        "default": true
-    },
-    "public_prefix": {
-        "description": "公共链接路径前缀",
-        "type": "string",
-        "default": "fish_house",
-        "hint": "最终链接为 http://服务器:6185/fish_house/index.html"
-    },
-    "crossfade_ms": {
-        "description": "视频叠化时长（毫秒）",
-        "type": "int",
-        "default": 400,
-        "slider": {
-            "min": 0,
-            "max": 2000,
-            "step": 50
-        }
-    },
-    "trigger_on_reply": {
-        "description": "Bot 发消息时触发拿手机动画",
-        "type": "bool",
-        "default": true
-    },
-    "max_upload_mb": {
-        "description": "单个视频上传上限（MB）",
-        "type": "int",
-        "default": 200,
-        "slider": {
-            "min": 10,
-            "max": 1024,
-            "step": 10
-        }
-    },
-    "auto_reply": {
-        "description": "自动播放回消息动画",
-        "type": "bool",
-        "default": true,
-        "hint": "关闭后完全由接口驱动；不影响 work_start/work_end。"
-    },
-    "idle_seconds": {
-        "description": "电脑前无任务自动休息时间（秒）",
-        "type": "int",
-        "default": 60,
-        "slider": {
-            "min": 10,
-            "max": 300,
-            "step": 10
-        },
-        "hint": "一轮活干完后，超过这么久没有新动作就回休息；工具执行期间会暂停计时。"
-    },
-    "max_work_seconds": {
-        "description": "连续干活安全上限（秒）",
-        "type": "int",
-        "default": 1800,
-        "slider": {
-            "min": 300,
-            "max": 7200,
-            "step": 300
-        },
-        "hint": "万一模型一直不调用 house_work_end，超过这个时间会强制回休息。"
+        "default": false,
+        "hint": "开启后，非管理员的消息不会触发桌宠动作、回复延迟与动画；默认关闭，所有用户都可触发。"
     }
 }

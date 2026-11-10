@@ -17,7 +17,7 @@ desc: |
   - 动作可扩展：面板里随时新增动作，自动出现在流程图中；
   - WebUI 导入/替换 7 段视频，带状态预览和手动触发；
   - 提供独立公共链接，不需要登录 AstrBot 面板也能看桌宠。
-version: 2.0.0
+version: 2.0.1
 author: jiuchai
 astrbot_version: ">=4.9.0"
 support_platforms:

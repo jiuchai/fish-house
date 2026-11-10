@@ -30,7 +30,7 @@ from astrbot.core.config.astrbot_config import AstrBotConfig
 from astrbot.core.utils.astrbot_path import get_astrbot_data_path
 
 PLUGIN_NAME = "astrbot_plugin_fish_house"
-VERSION = "2.0.0"
+VERSION = "2.0.1"
 
 SLOTS = [
     ("rest", "休息循环", "啥也不干时循环播放"),
@@ -2351,9 +2351,21 @@ class FishHousePlugin(Star):
             theme_store.materialize_theme, theme, theme_dir, self.video_dir, tid
         )
         self.actions = config["actions"] or self.actions
-        self.videos = config["videos"]
-        self.audio = config["audio"]
-        self.durations = config["durations"]
+        # 有些主题只带素材库/画布，没有 7 个槽位视频；缺的槽位保留当前视频，
+        # 当前也没有时回退到内置视频，避免应用后公共页变成“还没有导入视频”。
+        merged_videos = dict(self.videos or {})
+        merged_videos.update(
+            {key: value for key, value in (config.get("videos") or {}).items() if value}
+        )
+        merged_audio = {**self.audio, **(config.get("audio") or {})}
+        merged_durations = {**self.durations, **(config.get("durations") or {})}
+        for slot, (filename, duration) in BUILTIN_VIDEOS.items():
+            if not merged_videos.get(slot) and (self.video_dir / filename).is_file():
+                merged_videos[slot] = f"videos/{filename}"
+                merged_durations.setdefault(slot, duration)
+        self.videos = merged_videos
+        self.audio = merged_audio
+        self.durations = merged_durations
         self.library = config["library"]
         self.flow = config["flow"]
         if config["settings"].get("crossfade_ms") is not None:

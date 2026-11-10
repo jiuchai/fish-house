@@ -229,20 +229,23 @@ class FishHousePlugin(Star):
         if pickup is None:
             return
         edges = self.flow.setdefault("edges", [])
+        for edge in edges:
+            if edge.get("label") == "提前收到消息":
+                edge["label"] = "收到消息"
         for node in nodes:
             if node.get("role") != "wait":
                 continue
             existing = next((e for e in edges if e.get("from") == node.get("id")), None)
             if existing is not None:
                 if existing.get("to") == pickup.get("id") and existing.get("label") == "收到消息":
-                    existing["label"] = "提前收到消息"
+                    existing["label"] = "收到消息"
                 continue
             edges.append(
                 {
                     "id": f"e_{node.get('id')}_msg",
                     "from": node.get("id"),
                     "to": pickup.get("id"),
-                    "label": "提前收到消息",
+                    "label": "收到消息",
                 }
             )
 
@@ -345,8 +348,31 @@ class FishHousePlugin(Star):
             except (TypeError, ValueError):
                 cleaned[key] = default
         self.settings = cleaned
+        self._restore_flow_state()
         if self.public_prefix_enabled():
             self._write_config()
+
+    def _restore_flow_state(self) -> None:
+        """重启后如果之前停在画布节点，继续播放该节点，不退回旧休息态。"""
+        try:
+            if not self.state_file.is_file():
+                return
+            saved = json.loads(self.state_file.read_text(encoding="utf-8"))
+            if not isinstance(saved, dict) or saved.get("mode") != "flow":
+                return
+            node = self._flow_node(str(saved.get("node_id") or ""))
+            if node is None:
+                return
+            self.state.update(
+                mode="flow",
+                node_id=str(node.get("id") or ""),
+                node_video=self._node_video(node),
+                node_loop=bool(node.get("loop")),
+                node_label=str(node.get("label") or node.get("id") or ""),
+                updated_at=time.time(),
+            )
+        except Exception as exc:
+            logger.warning(f"大肥鱼的小屋恢复画布状态失败: {exc}")
 
     def public_prefix_enabled(self) -> bool:
         return bool(str(self._cfg("enabled", True)).lower() not in {"0", "false", "off", "no"})
@@ -1277,13 +1303,14 @@ class FishHousePlugin(Star):
                 if not re.fullmatch(r"[A-Za-z0-9_.-]{1,64}", nid) or nid in ids:
                     continue
                 ids.add(nid)
+                role = str(item.get("role") or "action")[:20]
                 nodes.append(
                     {
                         "id": nid,
                         "label": str(item.get("label") or nid)[:40],
                         "video": str(item.get("video") or ""),
-                        "loop": bool(item.get("loop")),
-                        "role": str(item.get("role") or "action")[:20],
+                        "loop": False if role in {"both_done", "work_done"} else bool(item.get("loop")),
+                        "role": role,
                         "prompt": str(item.get("prompt") or "")[:300],
                         "note": str(item.get("note") or "")[:80],
                         "duration": max(0.0, float(item.get("duration") or 0)),
@@ -1645,6 +1672,21 @@ class FishHousePlugin(Star):
                 self._tasks.add(task)
                 task.add_done_callback(self._tasks.discard)
                 resting = True
+            if mode == "flow" and not resting:
+                # 画布停在循环等待节点时，收到消息就自动走唯一的出边；
+                # 多条出边仍交给模型/用户选择，避免替用户乱选。
+                current = self._flow_node(str(self.state.get("node_id") or ""))
+                if current is not None and current.get("role") == "wait":
+                    outgoing = self._flow_outgoing(str(current.get("id") or ""))
+                    target_edge = outgoing[0] if len(outgoing) == 1 else None
+                    if target_edge is None:
+                        target_edge = next(
+                            (edge for edge in outgoing if "收到消息" in str(edge.get("label") or "")),
+                            None,
+                        )
+                    target_id = str((target_edge or {}).get("to") or "")
+                    if target_id and target_id != current.get("id"):
+                        await self.flow_goto(target_id)
             if (
                 not resting
                 and mode != "flow"
@@ -2382,6 +2424,16 @@ class FishHousePlugin(Star):
         self._ensure_library()
         self._write_config()
         await self._sync_public()
+        # 主题没有独立的 rest 槽位时，不再强行切回旧的 rest 视频；
+        # 直接进入该主题画布的第一个循环节点，让“画布上有素材就能跑”。
+        if not str((config.get("videos") or {}).get("rest") or "").strip():
+            nodes = config.get("flow", {}).get("nodes") or []
+            start = next(
+                (n for n in nodes if n.get("role") in {"wait", "both", "work", "phone"} and n.get("loop")),
+                nodes[0] if nodes else None,
+            )
+            if start and await self.flow_goto(str(start.get("id") or "")):
+                return True
         await self.force_rest()
         return True
 
@@ -2495,11 +2547,11 @@ class FishHousePlugin(Star):
     def _project_payload(self, tid: str) -> dict[str, Any]:
         theme_file = self.themes_dir / tid / "theme.json"
         theme = theme_store.read_theme_json(theme_file)
-        self._hydrate_project_videos(tid, theme)
         config = theme.setdefault("config", {})
+        changed = False
+        self._hydrate_project_videos(tid, theme)
         nodes = config.get("flow", {}).setdefault("nodes", [])
         edges = config.get("flow", {}).setdefault("edges", [])
-        changed = False
         for node in nodes:
             if node.get("role") == "rest" and node.get("loop"):
                 node["role"] = "wait"
@@ -2518,7 +2570,7 @@ class FishHousePlugin(Star):
                         "id": f"e_{node.get('id')}_msg",
                         "from": node.get("id"),
                         "to": pickup.get("id"),
-                        "label": "提前收到消息",
+                        "label": "收到消息",
                     }
                 )
                 changed = True

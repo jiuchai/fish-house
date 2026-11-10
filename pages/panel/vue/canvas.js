@@ -61,13 +61,15 @@ window.CanvasPanel = {
       }
     },
     roleLabel(role) {
-      return { wait: "循环等待", both: "回消息/工作", work: "仅工作", phone: "仅回消息", rest: "循环等待", action: "动作", transition: "过渡" }[role] || "动作";
+      return { wait: "循环等待", both: "回消息/工作", both_done: "回消息/工作（工作完即走）", work: "仅工作", work_done: "仅工作（工作完即走）", phone: "仅回消息", rest: "循环等待", action: "动作", transition: "过渡" }[role] || "动作";
     },
     roleDescription(role) {
       return {
         wait: "循环等待：停在这里等消息，收到消息后按出边继续",
         both: "回消息/工作：可以在这里回复消息，也可以接任务；无任务一分钟走向下一个节点",
+        both_done: "回消息/工作（工作完即走）：可回消息、接工作；工作/视频结束立即走下一个节点，不额外等一分钟",
         work: "仅工作：只接任务，不处理消息；无任务一分钟走向下一个节点",
+        work_done: "仅工作（工作完即走）：只接任务；工作/视频结束立即走下一个节点，不额外等一分钟",
         phone: "仅回消息：只回复消息，不接工作；收到消息时进入",
         rest: "循环等待：停在这里等消息，收到消息后按出边继续",
         action: "动作：播一次后按出边继续",
@@ -79,7 +81,7 @@ window.CanvasPanel = {
       this.edges = JSON.parse(JSON.stringify(flow.edges || []));
       for (const node of this.nodes) {
         if (["wait", "both", "work", "phone", "rest"].includes(node.role)) node.loop = true;
-        else if (["action", "transition"].includes(node.role)) node.loop = false;
+        else node.loop = false;
       }
       if (this.selectedId && !this.nodes.some((n) => n.id === this.selectedId)) this.selectedId = "";
       if (this.selectedEdgeId && !this.edges.some((e) => e.id === this.selectedEdgeId)) this.selectedEdgeId = "";
@@ -243,7 +245,12 @@ window.CanvasPanel = {
       if (item) {
         this.selected.video = item.video;
         this.selected.duration = Number(item.duration) || 0;
+      } else if (!id) {
+        this.selected.video = "";
+        this.selected.duration = 0;
       }
+      if (item) this.toast(`已选素材：${item.name}`);
+      this.$nextTick(() => { this.save(true); });
     },
     addNode() {
       const id = `node_${Date.now().toString(36)}`;
@@ -350,7 +357,7 @@ window.CanvasPanel = {
                 class="fnode" :class="['role-' + (node.role || 'action'), { current: node.id === currentId, 'wait-left': node.role === 'wait' && copy === 'left', 'wait-right': node.role === 'wait' && copy === 'right' }]"
                 :style="{ left: nodeLeft(node, copy) + 'px', top: node.y + 'px' }"
                 @mousedown.stop="startNodeDrag(node, $event, copy)" @mouseup.stop.prevent="onNodeUp(node)" @click.stop="selectNode(node)" @contextmenu.prevent.stop="deleteNodeNow(node)">
-                <span v-if="node.role === 'wait' && copy === 'left'" class="wait-side left">提前收到消息</span>
+                <span v-if="node.role === 'wait' && copy === 'left'" class="wait-side left">收到消息</span>
                 <span v-if="node.role === 'wait' && copy === 'right'" class="wait-side right">完成任务</span>
                 <div class="fnode-title">{{ node.label }}</div>
                 <div class="fnode-meta">{{ roleLabel(node.role) }} · {{ node.loop ? '循环' : '播一次' }}<span v-if="mediaName(node) !== roleLabel(node.role)"> · {{ mediaName(node) }}</span></div>
@@ -371,19 +378,23 @@ window.CanvasPanel = {
             <el-select v-model="selected.role" style="width: 100%" @change="onRoleChange">
               <el-option label="循环等待" value="wait"></el-option>
               <el-option label="回消息/工作" value="both"></el-option>
+              <el-option label="回消息/工作（工作完即走）" value="both_done"></el-option>
               <el-option label="仅工作" value="work"></el-option>
+              <el-option label="仅工作（工作完即走）" value="work_done"></el-option>
               <el-option label="仅回消息" value="phone"></el-option>
               <el-option label="动作" value="action"></el-option>
               <el-option label="过渡" value="transition"></el-option>
             </el-select>
           </label>
           <p class="role-desc">{{ roleDescription(selected.role) }}</p>
-          <label>素材<el-select :model-value="selected.media_id" style="width: 100%" @change="onMedia">
-            <el-option label="（不使用素材库）" value=""></el-option>
-            <el-option v-for="item in library" :key="item.id" :label="item.name + ' · ' + Number(item.duration || 0).toFixed(1) + 's'" :value="item.id"></el-option>
-          </el-select></label>
+          <label>素材
+            <select class="node-media-select" v-model="selected.media_id" @change="onMedia(selected.media_id)">
+              <option value="">（不使用素材库）</option>
+              <option v-for="item in library" :key="item.id" :value="item.id">{{ item.name }} · {{ Number(item.duration || 0).toFixed(1) }}s</option>
+            </select>
+          </label>
+          <p class="role-desc">当前素材：{{ (library.find((x) => x.id === selected.media_id) || {}).name || "未选择素材" }}；只匹配当前项目素材，切换后自动保存到项目。</p>
           <label>提示词<textarea v-model="selected.prompt" rows="3" maxlength="300"></textarea></label>
-          <label>视频地址<input v-model="selected.video" placeholder="videos/xxx.mp4 或 http(s)://" /></label>
           <label>时长（秒）<input v-model.number="selected.duration" type="number" min="0" step="0.1" /></label>
           <div class="node-actions">
             <button class="btn small primary" type="button" @click="play" v-if="!projectMode">播放此节点</button>

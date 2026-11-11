@@ -1,6 +1,7 @@
 """Theme package helpers for astrbot_plugin_fish_house.
 
-`.fishtheme` = zip(theme.json, videos/*, cover.*).
+主题包 = zip(theme.json, videos/*, cover.*)，导出后缀为 `.zip`；
+导入同时兼容旧的 `.fishtheme` 后缀。
 """
 
 from __future__ import annotations
@@ -131,7 +132,7 @@ def build_theme(
     if cover and cover.is_file() and cover.suffix.lower() in {".jpg", ".jpeg", ".png", ".webp"}:
         theme["meta"]["cover"] = "cover" + cover.suffix.lower()
 
-    zip_path = themes_dir / f"{theme_id}.fishtheme"
+    zip_path = themes_dir / f"{theme_id}.zip"
     tmp = zip_path.with_suffix(".tmp")
     with zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED) as zf:
         zf.writestr("theme.json", json.dumps(theme, ensure_ascii=False, indent=2))
@@ -177,7 +178,7 @@ def read_theme(zip_path: Path) -> dict[str, Any]:
                 raise ValueError("缺少 theme.json")
             data = json.loads(zf.read("theme.json").decode("utf-8"))
     except zipfile.BadZipFile:
-        raise ValueError("不是有效的 fishtheme/zip")
+        raise ValueError("不是有效的主题包（zip）")
     return _validate_theme(data)
 
 
@@ -209,9 +210,11 @@ def install_theme(zip_path: Path, themes_dir: Path) -> dict[str, Any]:
     (target / "theme.json").write_text(
         json.dumps(theme, ensure_ascii=False, indent=2), encoding="utf-8"
     )
-    saved = themes_dir / f"{tid}.fishtheme"
+    saved = themes_dir / f"{tid}.zip"
     if zip_path.resolve() != saved.resolve():
         shutil.copy2(zip_path, saved)
+    # 兼容旧版本：安装后不再保留 .fishtheme 副本
+    (themes_dir / f"{tid}.fishtheme").unlink(missing_ok=True)
     return {"id": tid, "dir": str(target), "theme": theme, "zip": str(saved)}
 
 
@@ -230,7 +233,10 @@ def list_installed(themes_dir: Path) -> list[dict[str, Any]]:
         except Exception:
             continue
         meta = theme.get("meta") or {}
-        zip_file = themes_dir / f"{path.name}.fishtheme"
+        zip_file = themes_dir / f"{path.name}.zip"
+        if not zip_file.is_file():
+            # 兼容旧主题包后缀
+            zip_file = themes_dir / f"{path.name}.fishtheme"
         items.append(
             {
                 "id": path.name,
@@ -263,37 +269,48 @@ def materialize_theme(
         if not source.is_file():
             return ""
         suffix = source.suffix.lower() or ".mp4"
+        size = source.stat().st_size
         dest = video_dir / (
             f"theme_{safe_name(theme_id, 't')}_{safe_name(source.stem, 'video')}{suffix}"
         )
-        index = 1
-        while dest.exists():
-            dest = video_dir / f"{dest.stem}-{index}{suffix}"
-            index += 1
-        shutil.copy2(source, dest)
+        # 已经复制过同样大小的文件就直接复用，避免每次应用都堆出 -1、-2 的副本
+        if dest.exists():
+            base = dest
+            index = 1
+            while dest.exists() and dest.stat().st_size != size:
+                dest = video_dir / f"{base.stem}-{index}{suffix}"
+                index += 1
+        if not dest.exists():
+            shutil.copy2(source, dest)
         copied[value] = f"videos/{dest.name}"
         return copied[value]
 
     library = []
     id_map: dict[str, str] = {}
+    video_by_new_id: dict[str, str] = {}
     for item in config.get("library") or []:
         new_id = f"m_{uuid.uuid4().hex[:8]}"
         old_id = str(item.get("id") or "")
         if old_id:
             id_map[old_id] = new_id
+        video = rewrite(str(item.get("video") or ""))
+        video_by_new_id[new_id] = video
         library.append(
             {
                 "id": new_id,
                 "name": str(item.get("name") or "素材")[:40],
-                "video": rewrite(str(item.get("video") or "")),
+                "video": video,
                 "duration": max(0.0, float(item.get("duration") or 0)),
             }
         )
 
     flow = json.loads(json.dumps(config.get("flow") or {"nodes": [], "edges": []}))
     for node in flow.get("nodes") or []:
-        node["video"] = rewrite(str(node.get("video") or ""))
-        node["media_id"] = id_map.get(str(node.get("media_id") or ""), "")
+        new_media = id_map.get(str(node.get("media_id") or ""), "")
+        node["media_id"] = new_media
+        # 节点绑定了素材就以素材当前的文件为准，避免素材被“更换”后节点还留旧路径
+        bound = str(video_by_new_id.get(new_media) or "")
+        node["video"] = bound or rewrite(str(node.get("video") or ""))
         node.pop("outfit", None)
 
     return {

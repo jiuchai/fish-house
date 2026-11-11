@@ -1,11 +1,94 @@
-window.CanvasPanel = {
-  props: { flow: Object, state: Object, library: Array, toast: Function, confirm: Function, readonly: Boolean, projectMode: Boolean },
+<template>
+  <section class="tab-page canvas-page" :class="{ preview: readonly }">
+    <div class="page-head" v-if="!readonly">
+      <div><h2>{{ title }}</h2><p class="muted">{{ hint }}</p></div>
+      <div class="head-actions">
+        <button class="btn" type="button" @click="addNode">新增节点</button>
+        <button class="btn" type="button" @click="generate" v-if="!projectMode">重新生成</button>
+        <button class="btn" type="button" @click="refit">适应画布</button>
+        <button class="btn primary" type="button" @click="save()">保存画布</button>
+      </div>
+    </div>
+    <div class="current-node"><i></i>当前节点：{{ currentLabel }}</div>
+    <div class="canvas-layout" :class="{ 'has-editor': selected && !readonly }">
+      <div class="canvas" ref="canvas" @mousedown.self="startPan" @wheel="onWheel">
+        <div class="world" :style="worldStyle">
+          <svg class="edges" width="4000" height="3000">
+            <defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M 0 0 L 10 5 L 0 10 z" fill="#c8b79d"></path></marker></defs>
+            <g v-for="edge in edges" :key="edge.id">
+              <path :d="edgePath(edge)" fill="none" stroke="transparent" stroke-width="14" class="edge-hit" @click.stop="selectEdge(edge)" @contextmenu.prevent.stop="deleteEdgeNow(edge.id)"></path>
+              <path :d="edgePath(edge)" fill="none" :stroke="edge.id === selectedEdgeId ? '#3f6f7e' : '#c8b79d'" :stroke-width="edge.id === selectedEdgeId ? 3 : 2" marker-end="url(#arrow)" pointer-events="none"></path>
+            </g>
+            <path v-if="link" :d="linkPath()" fill="none" stroke="#4f7d8c" stroke-width="2" stroke-dasharray="5 4"></path>
+          </svg>
+          <template v-for="node in nodes" :key="node.id">
+            <div v-for="copy in nodeCopies(node)" :key="copy" :ref="el => setNodeRef(node.id, el)"
+              class="fnode" :class="['role-' + (node.role || 'action'), { current: node.id === currentId, selected: node.id === selectedId, 'wait-left': node.role === 'wait' && copy === 'left', 'wait-right': node.role === 'wait' && copy === 'right' }]"
+              :style="{ left: nodeLeft(node, copy) + 'px', top: node.y + 'px' }"
+              @mousedown.stop="startNodeDrag(node, $event, copy)" @mouseup.stop.prevent="onNodeUp(node)" @click.stop="selectNode(node)" @contextmenu.prevent.stop="deleteNodeNow(node)">
+              <span v-if="node.role === 'wait' && copy === 'left'" class="wait-side left">收到消息</span>
+              <span v-if="node.role === 'wait' && copy === 'right'" class="wait-side right">完成任务</span>
+              <div class="fnode-title">{{ node.label }}</div>
+              <div class="fnode-meta">类型：{{ roleLabel(node.role) }}</div>
+              <div class="fnode-desc">{{ roleDescription(node.role) }}</div>
+              <div class="fnode-media">素材：{{ mediaName(node) }}</div>
+              <template v-if="!readonly">
+                <span v-if="copy !== 'left'" class="port in"></span>
+                <span v-if="copy !== 'right'" class="port out" @mousedown.stop.prevent="startLink(node, $event)"></span>
+              </template>
+            </div>
+          </template>
+        </div>
+      </div>
+      <aside class="node-editor" v-if="selected && !readonly">
+        <h3>节点设置</h3>
+        <label>名称<input v-model="selected.label" maxlength="40" /></label>
+        <label>类型
+          <el-select v-model="selected.role" style="width: 100%" @change="onRoleChange">
+            <el-option label="循环等待" value="wait"></el-option>
+            <el-option label="回消息/工作" value="both"></el-option>
+            <el-option label="回消息/工作（工作完即走）" value="both_done"></el-option>
+            <el-option label="仅工作" value="work"></el-option>
+            <el-option label="仅工作（工作完即走）" value="work_done"></el-option>
+            <el-option label="仅回消息" value="phone"></el-option>
+            <el-option label="动作" value="action"></el-option>
+            <el-option label="过渡" value="transition"></el-option>
+          </el-select>
+        </label>
+        <p class="role-desc">{{ roleDescription(selected.role) }}</p>
+        <label>素材
+          <el-select v-model="selected.media_id" style="width: 100%" filterable clearable placeholder="不使用素材库" @change="onMedia">
+            <el-option v-for="item in library" :key="item.id" :value="item.id" :label="`${item.name} · ${Number(item.duration || 0).toFixed(1)}s`"></el-option>
+          </el-select>
+        </label>
+        <p class="role-desc">当前素材：{{ (library.find((x) => x.id === selected.media_id) || {}).name || "未选择素材" }}；只匹配当前项目素材，切换后自动保存到项目。</p>
+        <label>提示词 / 气泡文案<textarea v-model="selected.prompt" rows="3" maxlength="300" placeholder="进入这个节点时显示在壁纸底部，例如：帮主人查天气"></textarea></label>
+        <label>时长（秒）<input v-model.number="selected.duration" type="number" min="0" step="0.1" /></label>
+        <div class="node-actions">
+          <button class="btn small primary" type="button" @click="play" v-if="!projectMode">播放此节点</button>
+          <button class="btn small" type="button" @click="save()">保存</button>
+          <button class="btn small danger" type="button" @click="deleteNode" v-if="!readonly">删除</button>
+        </div>
+      </aside>
+    </div>
+  </section>
+</template>
+
+<script>
+import { apiPost } from "../api.js";
+
+export default {
+  props: {
+    flow: Object, state: Object, library: Array, toast: Function, confirm: Function, readonly: Boolean, projectMode: Boolean,
+    title: { type: String, default: "动作画布" },
+    hint: { type: String, default: "拖节点、从圆点拉线；点节点或连线选中后按 Delete，右键也可删除。" },
+  },
   emits: ["flow-changed", "state-changed", "save-project"],
   data() {
     return {
       nodes: [], edges: [], sizes: {}, nodeEls: {},
       view: { x: 24, y: 24, scale: 1 },
-      selectedId: "", selectedEdgeId: "", link: null, drag: null, pan: null, fitDone: false, rightRail: 1150,
+      selectedId: "", selectedEdgeId: "", link: null, drag: null, pan: null, fitDone: false, rightRail: 1150, selfSaved: false, canvasWidth: 0,
     };
   },
   computed: {
@@ -15,7 +98,15 @@ window.CanvasPanel = {
     selected() { return this.nodes.find((n) => n.id === this.selectedId) || null; },
     currentId() {
       const s = this.state || {};
-      if (s.mode === "flow") return String(s.node_id || "");
+      if (s.mode === "flow") {
+        // 以壁纸页回报的“真正在播的节点”为准，避免视频还没切过去就提前高亮下一个节点
+        const playedAt = Number(s.playing_at || 0);
+        const fresh = playedAt > 0 && Date.now() / 1000 - playedAt < 60;
+        if (fresh && s.playing_node && this.nodes.some((n) => n.id === s.playing_node)) {
+          return String(s.playing_node);
+        }
+        return String(s.node_id || "");
+      }
       if (s.mode === "rest") return ((this.nodes.find((n) => n.role === "rest") || this.nodes.find((n) => n.role === "wait")) || {}).id || "";
       if (s.node_id && this.nodes.some((n) => n.id === s.node_id)) return String(s.node_id);
       const role = s.mode === "computer" ? "work" : s.mode === "phone" ? "phone" : "";
@@ -34,11 +125,25 @@ window.CanvasPanel = {
     window.addEventListener("mousemove", this.onMove);
     window.addEventListener("mouseup", this.onUp);
     window.addEventListener("keydown", this.onKeyDown);
+    const canvas = this.$refs.canvas;
+    if (canvas) {
+      this.canvasWidth = canvas.getBoundingClientRect().width;
+      // 画布从隐藏切回来（宽度 0 → 实际宽度）或容器宽度变化时重新自适应，避免位置跑偏。
+      this.resizeObserver = new ResizeObserver(() => {
+        const width = canvas.getBoundingClientRect().width;
+        const wasHidden = this.canvasWidth < 10;
+        this.canvasWidth = width;
+        if (width < 10) return;
+        if (wasHidden || this.readonly) this.refit();
+      });
+      this.resizeObserver.observe(canvas);
+    }
   },
   beforeUnmount() {
     window.removeEventListener("mousemove", this.onMove);
     window.removeEventListener("mouseup", this.onUp);
     window.removeEventListener("keydown", this.onKeyDown);
+    if (this.resizeObserver) this.resizeObserver.disconnect();
   },
   methods: {
     nodeCopies(node) {
@@ -65,16 +170,16 @@ window.CanvasPanel = {
     },
     roleDescription(role) {
       return {
-        wait: "循环等待：停在这里等消息，收到消息后按出边继续",
-        both: "回消息/工作：可以在这里回复消息，也可以接任务；无任务一分钟走向下一个节点",
-        both_done: "回消息/工作（工作完即走）：可回消息、接工作；工作/视频结束立即走下一个节点，不额外等一分钟",
-        work: "仅工作：只接任务，不处理消息；无任务一分钟走向下一个节点",
-        work_done: "仅工作（工作完即走）：只接任务；工作/视频结束立即走下一个节点，不额外等一分钟",
-        phone: "仅回消息：只回复消息，不接工作；收到消息时进入",
-        rest: "循环等待：停在这里等消息，收到消息后按出边继续",
-        action: "动作：播一次后按出边继续",
-        transition: "过渡：播完按出边继续",
-      }[role] || "动作：播一次后按出边继续";
+        wait: "等消息，收到后按出边继续",
+        both: "可回消息、接任务；空闲一分钟继续",
+        both_done: "可回消息、接任务；结束立即继续",
+        work: "只接任务；空闲一分钟继续",
+        work_done: "只接任务；结束立即继续",
+        phone: "只回消息，收到消息时进入",
+        rest: "等消息，收到后按出边继续",
+        action: "播一次后按出边继续",
+        transition: "播完按出边继续",
+      }[role] || "播一次后按出边继续";
     },
     loadFlow(flow) {
       this.nodes = JSON.parse(JSON.stringify(flow.nodes || []));
@@ -85,10 +190,17 @@ window.CanvasPanel = {
       }
       if (this.selectedId && !this.nodes.some((n) => n.id === this.selectedId)) this.selectedId = "";
       if (this.selectedEdgeId && !this.edges.some((e) => e.id === this.selectedEdgeId)) this.selectedEdgeId = "";
+      // 编辑模式下默认选中起点节点，右侧设置面板常驻，避免点节点时突然弹出。
+      if (!this.readonly && this.nodes.length && !this.selectedId) {
+        const start = this.nodes.find((n) => ["wait", "both", "work", "phone", "rest"].includes(n.role) && n.loop) || this.nodes[0];
+        this.selectedId = start.id;
+      }
       this.$nextTick(() => {
         this.measure();
-        if (!this.fitDone) { this.fit(); this.fitDone = true; }
-        setTimeout(() => this.refit(), 220);
+        // 画布被隐藏时测不到尺寸，先不标记完成，等重新显示时再自适应。
+        if (!this.fitDone) this.fitDone = this.fit();
+        else if (!this.selfSaved) this.refit();
+        this.selfSaved = false;
       });
     },
     measure() {
@@ -106,8 +218,9 @@ window.CanvasPanel = {
       this.fit();
     },
     fit() {
-      if (!this.nodes.length || !this.$refs.canvas) return;
+      if (!this.nodes.length || !this.$refs.canvas) return false;
       const rect = this.$refs.canvas.getBoundingClientRect();
+      if (rect.width < 10 || rect.height < 10) return false;
       let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
       for (const n of this.nodes) {
         const size = this.sizes[n.id] && this.sizes[n.id].w > 0 ? this.sizes[n.id] : { w: 190, h: 96 };
@@ -123,6 +236,7 @@ window.CanvasPanel = {
         x: (rect.width - spanX * scale) / 2 - minX * scale,
         y: (rect.height - spanY * scale) / 2 - minY * scale,
       };
+      return true;
     },
     edgePath(edge) {
       const from = this.nodes.find((n) => n.id === edge.from);
@@ -212,13 +326,15 @@ window.CanvasPanel = {
     },
     selectNode(node) {
       if (this.readonly) return;
+      // 让键盘焦点离开输入框，选中节点后按 Delete 才能直接删除。
+      const active = document.activeElement;
+      if (active && active !== document.body && typeof active.blur === "function") active.blur();
       this.selectedId = node.id;
       this.selectedEdgeId = "";
     },
     selectEdge(edge) {
       if (this.readonly) return;
       this.selectedEdgeId = edge.id;
-      this.selectedId = "";
     },
     onKeyDown(event) {
       if (this.readonly) return;
@@ -250,7 +366,6 @@ window.CanvasPanel = {
         this.selected.duration = 0;
       }
       if (item) this.toast(`已选素材：${item.name}`);
-      this.$nextTick(() => { this.save(true); });
     },
     addNode() {
       const id = `node_${Date.now().toString(36)}`;
@@ -276,19 +391,17 @@ window.CanvasPanel = {
       this.edges = this.edges.filter((e) => e.from !== node.id && e.to !== node.id);
       this.selectedId = "";
       this.selectedEdgeId = "";
-      await this.save(true);
     },
     async deleteNodeNow(node) {
       if (this.readonly || !node) return;
       await this.removeNode(node);
-      this.toast(`已删除节点「${node.label}」`);
+      this.toast(`已删除节点「${node.label}」，记得点保存画布`);
     },
     async deleteEdgeNow(edgeId) {
       if (this.readonly) return;
       this.edges = this.edges.filter((e) => e.id !== edgeId);
       this.selectedEdgeId = "";
-      await this.save(true);
-      this.toast("已删除连线");
+      this.toast("已删除连线，记得点保存画布");
     },
     async save(silent = false) {
       if (this.projectMode) {
@@ -329,79 +442,5 @@ window.CanvasPanel = {
       }
     },
   },
-  template: `
-    <section class="tab-page canvas-page" :class="{ preview: readonly }">
-      <div class="page-head" v-if="!readonly">
-        <div><h2>动作画布</h2><p class="muted">拖节点、从圆点拉线；点节点或连线选中后按 Delete，右键也可删除。</p></div>
-        <div class="head-actions">
-          <button class="btn" type="button" @click="addNode">新增节点</button>
-          <button class="btn" type="button" @click="generate" v-if="!projectMode">重新生成</button>
-          <button class="btn" type="button" @click="refit">适应画布</button>
-          <button class="btn primary" type="button" @click="save()">保存画布</button>
-        </div>
-      </div>
-      <div class="current-node"><i></i>当前节点：{{ currentLabel }}</div>
-      <div class="canvas-layout" :class="{ 'has-editor': selected && !readonly }">
-        <div class="canvas" ref="canvas" @mousedown.self="startPan" @wheel="onWheel">
-          <div class="world" :style="worldStyle">
-            <svg class="edges" width="4000" height="3000">
-              <defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M 0 0 L 10 5 L 0 10 z" fill="#c8b79d"></path></marker></defs>
-              <g v-for="edge in edges" :key="edge.id">
-                <path :d="edgePath(edge)" fill="none" stroke="transparent" stroke-width="14" class="edge-hit" @click.stop="selectEdge(edge)" @contextmenu.prevent.stop="deleteEdgeNow(edge.id)"></path>
-                <path :d="edgePath(edge)" fill="none" :stroke="edge.id === selectedEdgeId ? '#3f6f7e' : '#c8b79d'" :stroke-width="edge.id === selectedEdgeId ? 3 : 2" marker-end="url(#arrow)" pointer-events="none"></path>
-              </g>
-              <path v-if="link" :d="linkPath()" fill="none" stroke="#4f7d8c" stroke-width="2" stroke-dasharray="5 4"></path>
-            </svg>
-            <template v-for="node in nodes" :key="node.id">
-              <div v-for="copy in nodeCopies(node)" :key="copy" :ref="el => setNodeRef(node.id, el)"
-                class="fnode" :class="['role-' + (node.role || 'action'), { current: node.id === currentId, 'wait-left': node.role === 'wait' && copy === 'left', 'wait-right': node.role === 'wait' && copy === 'right' }]"
-                :style="{ left: nodeLeft(node, copy) + 'px', top: node.y + 'px' }"
-                @mousedown.stop="startNodeDrag(node, $event, copy)" @mouseup.stop.prevent="onNodeUp(node)" @click.stop="selectNode(node)" @contextmenu.prevent.stop="deleteNodeNow(node)">
-                <span v-if="node.role === 'wait' && copy === 'left'" class="wait-side left">收到消息</span>
-                <span v-if="node.role === 'wait' && copy === 'right'" class="wait-side right">完成任务</span>
-                <div class="fnode-title">{{ node.label }}</div>
-                <div class="fnode-meta">{{ roleLabel(node.role) }} · {{ node.loop ? '循环' : '播一次' }}<span v-if="mediaName(node) !== roleLabel(node.role)"> · {{ mediaName(node) }}</span></div>
-                <div class="fnode-desc">{{ roleDescription(node.role) }}</div>
-                <div v-if="node.prompt" class="fnode-prompt">{{ node.prompt }}</div>
-                <template v-if="!readonly">
-                  <span v-if="copy !== 'left'" class="port in"></span>
-                  <span v-if="copy !== 'right'" class="port out" @mousedown.stop.prevent="startLink(node, $event)"></span>
-                </template>
-              </div>
-            </template>
-          </div>
-        </div>
-        <aside class="node-editor" v-if="selected && !readonly">
-          <h3>节点设置</h3>
-          <label>名称<input v-model="selected.label" maxlength="40" /></label>
-          <label>类型
-            <el-select v-model="selected.role" style="width: 100%" @change="onRoleChange">
-              <el-option label="循环等待" value="wait"></el-option>
-              <el-option label="回消息/工作" value="both"></el-option>
-              <el-option label="回消息/工作（工作完即走）" value="both_done"></el-option>
-              <el-option label="仅工作" value="work"></el-option>
-              <el-option label="仅工作（工作完即走）" value="work_done"></el-option>
-              <el-option label="仅回消息" value="phone"></el-option>
-              <el-option label="动作" value="action"></el-option>
-              <el-option label="过渡" value="transition"></el-option>
-            </el-select>
-          </label>
-          <p class="role-desc">{{ roleDescription(selected.role) }}</p>
-          <label>素材
-            <select class="node-media-select" v-model="selected.media_id" @change="onMedia(selected.media_id)">
-              <option value="">（不使用素材库）</option>
-              <option v-for="item in library" :key="item.id" :value="item.id">{{ item.name }} · {{ Number(item.duration || 0).toFixed(1) }}s</option>
-            </select>
-          </label>
-          <p class="role-desc">当前素材：{{ (library.find((x) => x.id === selected.media_id) || {}).name || "未选择素材" }}；只匹配当前项目素材，切换后自动保存到项目。</p>
-          <label>提示词<textarea v-model="selected.prompt" rows="3" maxlength="300"></textarea></label>
-          <label>时长（秒）<input v-model.number="selected.duration" type="number" min="0" step="0.1" /></label>
-          <div class="node-actions">
-            <button class="btn small primary" type="button" @click="play" v-if="!projectMode">播放此节点</button>
-            <button class="btn small" type="button" @click="save()">保存</button>
-            <button class="btn small danger" type="button" @click="deleteNode" v-if="!readonly">删除</button>
-          </div>
-        </aside>
-      </div>
-    </section>`,
 };
+</script>

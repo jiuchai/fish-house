@@ -11,6 +11,14 @@ state.json
 backups/
 uploads/
 
+# Frontend build
+frontend/node_modules/
+frontend/dist/
+
+# 打包产物
+astrbot_plugin_fish_house-*.zip
+.trae-html-share-packages/
+
 # Editor / OS
 .DS_Store
 Thumbs.db

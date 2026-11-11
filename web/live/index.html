@@ -1,24 +1,36 @@
-<!doctype html>
+﻿<!doctype html>
 <html lang="zh-CN">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>大肥鱼的小屋</title>
-  <link rel="stylesheet" href="./style.css?v=4.0.1" />
+  <link rel="stylesheet" href="./style.css?v=4.2.0" />
 </head>
 <body>
-  <main id="stage" aria-label="大肥鱼的小屋桌宠">
+  <main id="stage" aria-label="大肥鱼的小屋壁纸">
     <video id="videoA" class="pet-video" muted playsinline preload="auto"></video>
     <video id="videoB" class="pet-video" muted playsinline preload="auto"></video>
     <div id="empty" class="empty hidden">
       <div class="empty-title">大肥鱼还在睡觉</div>
-      <div class="empty-text">还没有导入视频，去 AstrBot 插件面板「大肥鱼的小屋」导入 7 段视频吧</div>
+      <div class="empty-text">这个主题还没有配置视频，去插件面板的画布给节点加一段吧</div>
     </div>
     <div id="status" class="status" aria-live="polite">正在醒来…</div>
     <div id="bubble" class="bubble hidden" role="status"><span class="bubble-dot" aria-hidden="true"></span><span id="bubbleText"></span></div>
   </main>
   <button id="start" class="start hidden" type="button">点一下播放</button>
-  <button id="sound" class="sound" type="button" title="关闭声音" aria-label="关闭声音">🔊</button>
-  <script src="./app.js?v=4.0.1"></script>
+  <button id="sound" class="sound" type="button" title="关闭声音" aria-label="关闭声音">
+    <svg class="sound-ico ico-on" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <path d="M11 5 6.5 9H3v6h3.5L11 19V5Z" />
+      <path d="M15.6 9.2a4 4 0 0 1 0 5.6" />
+      <path d="M18.4 6.4a7.6 7.6 0 0 1 0 11.2" />
+    </svg>
+    <svg class="sound-ico ico-off" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <path d="M11 5 6.5 9H3v6h3.5L11 19V5Z" />
+      <path d="m16.2 9.6 4.8 4.8" />
+      <path d="m21 9.6-4.8 4.8" />
+    </svg>
+    <span class="sound-text"></span>
+  </button>
+  <script src="./app.js?v=4.2.3"></script>
 </body>
 </html>

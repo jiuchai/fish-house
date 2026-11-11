@@ -8,44 +8,40 @@
   const bubbleEl = document.getElementById("bubble");
   const bubbleText = document.getElementById("bubbleText");
 
-  let config = { videos: {}, audio: {}, crossfade_ms: 400, scale_percent: 70 };
-  let videos = {};
-  let slotAudio = {};
+  let config = { crossfade_ms: 400 };
+  let bubbleTimer = 0;
   let crossfade = 400;
+  let lastState = null;
   let active = 0;
   let token = 0;
   let started = false;
-  let currentMode = "rest";
-  let currentSlot = "";
   let lastSeq = -1;
-  let pendingOnce = null;
-  let pendingAfterPhone = "";
-  let pollBusy = false;
-  let timerId = null;
-  let currentFlowNode = "";
+  let lastNodeKey = "";
+  let currentKey = "";
   let soundOn = true;
   let soundBlocked = false;
   let soundHintTimer = null;
   let audioRamp = 0;
+  let socket = null;
+  let reconnectTimer = null;
 
   try {
     const savedSound = localStorage.getItem("fish_house_sound");
     if (savedSound === "0") soundOn = false;
   } catch (_) {}
 
-  const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-
-  async function fetchJson(url) {
-    const response = await fetch(url, { cache: "no-store" });
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    return response.json();
+  function fetchJson(url) {
+    return fetch(url, { cache: "no-store" }).then((response) => {
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      return response.json();
+    });
   }
 
-  function srcFor(slot) {
-    const raw = videos[slot];
-    if (!raw) return "";
-    if (/^(https?:|data:|blob:|\/)/i.test(raw)) return raw;
-    return `./${raw.replace(/^\.?\//, "")}`;
+  function srcFor(raw) {
+    const value = String(raw || "");
+    if (!value) return "";
+    if (/^(https?:|data:|blob:|\/)/i.test(value)) return value;
+    return `./${value.replace(/^\.?\//, "")}`;
   }
 
   function setStatus(text) {
@@ -56,20 +52,14 @@
     soundBtn.classList.toggle("muted", !soundOn);
     soundBtn.classList.toggle("attention", soundBlocked && !soundOn);
     if (soundBtn.classList.contains("hint")) return;
-    soundBtn.textContent = soundOn ? "🔊" : "🔇";
+    const textEl = soundBtn.querySelector(".sound-text");
+    if (textEl) textEl.textContent = "";
     soundBtn.title = soundOn ? "关闭声音" : "开启声音";
     soundBtn.setAttribute("aria-label", soundBtn.title);
   }
 
-  function audibleFor(slot) {
-    return slotAudio[slot] !== false;
-  }
-
   function applySound() {
-    for (const layer of layers) {
-      const audible = soundOn && audibleFor(layer.dataset.slot || "");
-      layer.muted = !audible;
-    }
+    for (const layer of layers) layer.muted = !soundOn;
     if (!audioRamp) {
       const current = layers[active];
       if (current && !current.muted) current.volume = 1;
@@ -95,9 +85,9 @@
       if (from && !from.muted) from.volume = 0;
       return;
     }
-    const started = performance.now();
+    const startedAt = performance.now();
     const step = (now) => {
-      const progress = Math.min(1, (now - started) / ms);
+      const progress = Math.min(1, (now - startedAt) / ms);
       if (to && !to.muted) to.volume = progress;
       if (from && !from.muted) from.volume = 1 - progress;
       if (progress < 1) {
@@ -114,7 +104,8 @@
   function showSoundHint() {
     if (soundHintTimer) clearTimeout(soundHintTimer);
     soundBtn.classList.add("hint");
-    soundBtn.textContent = "🔇 点我开声音";
+    const textEl = soundBtn.querySelector(".sound-text");
+    if (textEl) textEl.textContent = "点我开声音";
     soundBtn.title = "开启声音";
     soundHintTimer = setTimeout(() => {
       soundHintTimer = null;
@@ -144,24 +135,30 @@
       bubbleEl.classList.add("hidden");
       return;
     }
-    const text = String(state.bubble || "").trim();
+    const raw = String(state.bubble || "").trim();
     const until = Number(state.bubble_until || 0) * 1000;
-    const active = Boolean(text) && (!until || until > Date.now());
-    bubbleText.textContent = active ? text : "";
-    bubbleEl.classList.toggle("hidden", !active);
+    const alive = Boolean(raw) && (!until || until > Date.now());
+    const visible = config.show_bubble !== false && alive;
+    if (visible) {
+      if (bubbleText.textContent !== raw) bubbleText.textContent = raw;
+      // 下一帧再显示，保证从透明到可见有淡入过渡
+      requestAnimationFrame(() => bubbleEl.classList.remove("hidden"));
+    } else {
+      // 只做淡出，文字留到完全隐形后再清，避免闪一下
+      bubbleEl.classList.add("hidden");
+    }
+    // 到时间点主动收起，不依赖下一次状态推送
+    if (bubbleTimer) { clearTimeout(bubbleTimer); bubbleTimer = 0; }
+    if (visible && until > Date.now()) {
+      bubbleTimer = setTimeout(() => {
+        bubbleEl.classList.add("hidden");
+      }, until - Date.now());
+    }
   }
 
   function setEmpty(visible, text = "") {
     empty.classList.toggle("hidden", !visible);
     if (text) empty.querySelector(".empty-text").textContent = text;
-  }
-
-  function cancelPendingOnce() {
-    if (pendingOnce) {
-      const resolve = pendingOnce;
-      pendingOnce = null;
-      resolve();
-    }
   }
 
   function pauseLayer(video) {
@@ -196,18 +193,17 @@
     });
   }
 
-  async function playClip(slot, { loop = false, onEnded = null } = {}) {
-    const src = srcFor(slot);
+  async function playClip(raw, { loop = false } = {}) {
+    const src = srcFor(raw);
     if (!src) return false;
     const nextIndex = 1 - active;
     const prev = layers[active];
     const next = layers[nextIndex];
     pauseLayer(next);
     try {
-      next.dataset.slot = slot;
       next.src = src;
       next.loop = loop;
-      next.muted = !(soundOn && audibleFor(slot));
+      next.muted = !soundOn;
       next.volume = 0;
       next.playsInline = true;
       next.preload = "auto";
@@ -243,7 +239,6 @@
       next.style.transition = "";
     }
     active = nextIndex;
-    currentSlot = slot;
     const old = prev;
     const fade = Math.max(0, Number(crossfade) || 0);
     fadeAudio(hadVisible ? old : null, next, hadVisible ? fade : 0);
@@ -256,268 +251,88 @@
         try { old.load(); } catch (_) {}
       }
     }, fade + 80);
-    if (!loop) {
-      next.onended = () => {
-        next.onended = null;
-        if (onEnded) onEnded();
-      };
-      next.onerror = () => {
-        next.onended = null;
-        if (onEnded) onEnded();
-      };
-    }
     return true;
   }
 
-  function playOnce(slot) {
-    if (!srcFor(slot)) return Promise.resolve();
-    return new Promise((resolve) => {
-      let done = false;
-      const finish = () => {
-        if (done) return;
-        done = true;
-        if (pendingOnce === finish) pendingOnce = null;
-        resolve();
-      };
-      pendingOnce = finish;
-      playClip(slot, { loop: false, onEnded: finish }).then((ok) => {
-        if (!ok) finish();
-      }).catch(finish);
-    });
-  }
-
-  async function playLoop(slot) {
-    if (!srcFor(slot)) return false;
-    return playClip(slot, { loop: true });
-  }
-
-  async function runRest() {
-    currentFlowNode = "";
-    currentMode = "rest";
-    setEmpty(!srcFor("rest"), "还没有导入休息视频，先去插件面板导入吧");
-    if (!srcFor("rest")) return;
-    if (currentSlot === "rest" && !layers[active].paused) return;
-    await playLoop("rest");
-    setStatus("休息中");
-  }
-
-  async function phoneSequence(skipPickup = false) {
-    const my = ++token;
-    cancelPendingOnce();
-    currentMode = "phone";
-    if (!skipPickup && srcFor("phone_pickup")) {
-      await playOnce("phone_pickup");
-    }
-    if (my !== token) return;
-    if (srcFor("phone_loop")) {
-      setStatus("在看手机");
-      await playOnce("phone_loop");
-    } else {
-      await playLoop("rest");
-    }
-    if (my !== token) return;
-    await finishPhone();
-  }
-
-  async function finishPhone() {
-    const my = ++token;
-    const nextMode = pendingAfterPhone;
-    pendingAfterPhone = "";
-    cancelPendingOnce();
-    currentMode = "rest";
-    if (srcFor("phone_putdown")) {
-      await playOnce("phone_putdown");
-    }
-    if (my !== token) return;
-    if (nextMode === "computer") {
-      await startWork(false, true);
-      return;
-    }
-    await runRest();
-  }
-
-  async function startWork(auto = false, skipPutdown = false) {
-    if (currentMode === "computer") return;
-    const my = ++token;
-    cancelPendingOnce();
-    const wasPhone = currentMode === "phone";
-    currentMode = "computer";
-    if (!skipPutdown && wasPhone && srcFor("phone_putdown")) {
-      await playOnce("phone_putdown");
-    }
-    if (my !== token) return;
-    if (srcFor("computer_go")) {
-      await playOnce("computer_go");
-    }
-    if (my !== token) return;
-    if (auto) {
-      if (srcFor("computer_loop")) {
-        setStatus("在电脑前干活");
-        await playOnce("computer_loop");
-      }
-      if (my !== token) return;
-      await endWork();
-      return;
-    }
-    if (!(await playLoop("computer_loop"))) {
-      await playLoop("rest");
-    }
-    if (my !== token) return;
-    setStatus("在电脑前干活");
-  }
-
-  async function endWork() {
-    if (currentMode !== "computer") {
-      if (currentMode === "phone") await finishPhone();
-      return;
-    }
-    const my = ++token;
-    cancelPendingOnce();
-    currentMode = "rest";
-    if (srcFor("computer_rest")) {
-      await playOnce("computer_rest");
-    }
-    if (my !== token) return;
-    await runRest();
-    setStatus("忙完啦，回窝里歇着");
-  }
-
-  function actionLabel(key) {
-    const item = (config.actions || []).find((row) => row.key === key);
-    return item ? item.label || key : key;
-  }
-
-  async function playCustomAction(key, loop) {
-    if (!key) {
-      await runRest();
-      return;
-    }
-    if (!srcFor(key)) {
-      // 刚在面板/接口里加的动作，页面配置可能还没轮询到，先拉一次。
-      await refreshConfig();
-    }
-    if (!srcFor(key)) {
-      await runRest();
-      return;
-    }
-    const my = ++token;
-    cancelPendingOnce();
-    currentMode = "action";
-    setStatus(actionLabel(key));
-    if (loop) {
-      await playLoop(key);
-      return;
-    }
-    await playOnce(key);
-    if (my !== token) return;
-    await runRest();
-  }
-
-  async function playFlowNode(state) {
+  async function playNode(state) {
     const video = String(state.node_video || "");
+    const label = String(state.node_label || "");
+    currentKey = `${state.node_id || ""}|${video}`;
     if (!video) {
-      await runRest();
+      pauseLayer(layers[active]);
+      layers[active].removeAttribute("src");
+      try { layers[active].load(); } catch (_) {}
+      setEmpty(true, "这个主题还没配视频，去插件面板的画布给节点加一段吧");
+      setStatus("");
       return;
     }
     const my = ++token;
-    cancelPendingOnce();
-    currentMode = "flow";
-    currentFlowNode = String(state.node_id || "");
-    setStatus(String(state.node_label || "动作"));
-    videos.__flow__ = video;
-    const loop = Boolean(state.node_loop);
-    const ok = await playClip("__flow__", { loop });
-    if (!ok) {
-      await runRest();
-      return;
-    }
-    // 一次性节点：停在这里等插件按流程图切下一个节点（多出边时等模型选择）。
-    if (my !== token) return;
+    setStatus(label);
+    const ok = await playClip(video, { loop: Boolean(state.node_loop) });
+    if (!ok || my !== token) return;
+    reportPlaying(state.node_id);
+    // 一次性节点停在这里，等插件按画布自动切到下一个节点。
+  }
+
+  // 视频真正开始播放后才回报节点，面板的高亮以这个为准，避免提前高亮下一个节点。
+  function reportPlaying(nodeId) {
+    if (!nodeId || !socket || socket.readyState !== WebSocket.OPEN) return;
+    try { socket.send(JSON.stringify({ type: "playing", node_id: String(nodeId) })); } catch (_) {}
   }
 
   function handleInitial(state) {
+    lastState = state;
     renderBubble(state);
-    currentMode = state.mode || "rest";
-    pendingAfterPhone = String(state.after_phone || "");
-    if (state.mode === "action") {
-      void playCustomAction(String(state.action_key || ""), Boolean(state.action_loop));
-      return;
-    }
-    if (state.mode === "flow") {
-      void playFlowNode(state);
-      return;
-    }
-    if (state.mode === "computer") {
-      currentMode = "computer";
-      if (state.auto_work && srcFor("computer_loop")) {
-        playOnce("computer_loop").then(() => {
-          if (currentMode === "computer") endWork();
-        });
-      } else if (srcFor("computer_loop")) {
-        playLoop("computer_loop");
-      } else {
-        runRest();
-      }
-      setStatus("在电脑前");
-      return;
-    }
-    if (state.mode === "phone") {
-      currentMode = "phone";
-      pendingAfterPhone = String(state.after_phone || "");
-      if (srcFor("phone_loop")) {
-        setStatus("在看手机");
-        playOnce("phone_loop").then(() => {
-          if (currentMode === "phone") finishPhone();
-        });
-      } else {
-        runRest();
-      }
-      return;
-    }
-    runRest();
+    lastNodeKey = `${state.node_id || ""}|${state.node_video || ""}`;
+    void playNode(state);
   }
 
-  async function pollState() {
-    if (!started || pollBusy) return;
-    pollBusy = true;
-    try {
-      const state = await fetchJson(`./state.json?t=${Date.now()}`);
-      renderBubble(state);
-      const seq = Number(state.seq || 0);
-      if (seq === lastSeq) return;
-      lastSeq = seq;
-      const mode = state.mode || "rest";
-      if (mode === "action") {
-        pendingAfterPhone = "";
-        void playCustomAction(String(state.action_key || ""), Boolean(state.action_loop));
-      } else if (mode === "flow") {
-        pendingAfterPhone = "";
-        if (currentFlowNode !== String(state.node_id || "")) {
-          void playFlowNode(state);
-        }
-      } else if (mode === "rest") {
-        pendingAfterPhone = "";
-        if (currentMode === "computer") void endWork();
-        else if (currentMode === "phone") void finishPhone();
-        else void runRest();
-      } else if (mode === "computer") {
-        pendingAfterPhone = "";
-        if (currentMode !== "computer") void startWork(Boolean(state.auto_work));
-      } else if (mode === "phone") {
-        pendingAfterPhone = String(state.after_phone || pendingAfterPhone || "");
-        if (currentMode === "computer") return;
-        if (currentMode !== "phone") void phoneSequence(false);
-      }
-    } catch (error) {
-      setStatus("小屋连接中断，正在重试");
-    } finally {
-      pollBusy = false;
+  function applyState(state) {
+    if (!started) return;
+    lastState = state;
+    renderBubble(state);
+    const seq = Number(state.seq || 0);
+    if (seq === lastSeq) return;
+    lastSeq = seq;
+    const key = `${state.node_id || ""}|${state.node_video || ""}`;
+    if (key === lastNodeKey && key === currentKey && !layers[active].paused) {
+      setStatus(String(state.node_label || ""));
+      return;
     }
+    lastNodeKey = key;
+    void playNode(state);
+  }
+
+  function connectLive() {
+    if (socket) return;
+    const protocol = location.protocol === "https:" ? "wss:" : "ws:";
+    let current;
+    try {
+      current = new WebSocket(`${protocol}//${location.host}/ws`);
+    } catch (_) {
+      return;
+    }
+    socket = current;
+    current.onopen = () => {
+      setStatus("");
+    };
+    current.onmessage = (event) => {
+      let message;
+      try { message = JSON.parse(event.data); } catch (_) { return; }
+      if (message.type === "state" && message.state) applyState(message.state);
+      else if (message.type === "config" && message.config) applyConfig(message.config);
+    };
+    current.onclose = () => {
+      if (socket !== current) return;
+      socket = null;
+      clearTimeout(reconnectTimer);
+      reconnectTimer = setTimeout(connectLive, 3000);
+    };
+    current.onerror = () => {};
   }
 
   function showStartHint() {
     started = false;
-    if (timerId) { clearInterval(timerId); timerId = null; }
     startBtn.textContent = "点一下播放";
     startBtn.classList.remove("hidden");
     setStatus("浏览器拦下了自动播放，点一下画面继续");
@@ -527,48 +342,38 @@
     if (started) return;
     started = true;
     startBtn.classList.add("hidden");
-    if (timerId) clearInterval(timerId);
-    timerId = setInterval(pollState, 500);
     try {
-      const state = await fetchJson(`./state.json?t=${Date.now()}`);
+      const state = await fetchJson("./state.json");
       lastSeq = Number(state.seq || 0);
       handleInitial(state);
     } catch (_) {
-      await runRest();
+      setStatus("还没有配置，先去插件面板选一个主题");
+      setEmpty(true);
     }
   }
 
-  async function refreshConfig() {
-    try {
-      const data = await fetchJson(`./config.json?t=${Date.now()}`);
-      videos = data.videos || videos;
-      slotAudio = data.audio || {};
-      config.actions = data.actions || config.actions;
-      const nextFade = Math.max(0, Number(data.crossfade_ms || 400));
-      if (nextFade !== crossfade) {
-        crossfade = nextFade;
-        stage.style.setProperty("--fade", `${nextFade}ms`);
-      }
-      applySound();
-    } catch (_) {}
+  function applyConfig(data) {
+    config = { ...config, ...data };
+    const nextFade = Math.max(0, Number(data.crossfade_ms || 400));
+    if (nextFade !== crossfade) {
+      crossfade = nextFade;
+      stage.style.setProperty("--fade", `${nextFade}ms`);
+    }
+    applySound();
+    if (lastState) renderBubble(lastState);
   }
 
   async function boot() {
     try {
-      config = await fetchJson(`./config.json?t=${Date.now()}`);
-      videos = config.videos || {};
-      slotAudio = config.audio || {};
+      config = await fetchJson("./config.json");
       crossfade = Math.max(0, Number(config.crossfade_ms || 400));
-      stage.style.setProperty("--scale", String(Math.max(20, Number(config.scale_percent || 70)) / 100));
       stage.style.setProperty("--fade", `${crossfade}ms`);
-      setEmpty(!videos.rest, "还没有导入休息视频，先去插件面板导入吧");
     } catch (error) {
-      setStatus("还没有配置，先去插件面板导入视频");
-      setEmpty(true);
+      setStatus("还没有配置，先去插件面板选一个主题");
     }
     // 打开就播：默认带声音；浏览器拦下带声音的自动播放时先静音播，点喇叭开声音。
     await beginPlayback();
-    setInterval(refreshConfig, 8000);
+    connectLive();
   }
 
   startBtn.addEventListener("click", () => {

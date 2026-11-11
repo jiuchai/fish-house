@@ -1,0 +1,26 @@
+name: fish-house-market
+
+services:
+  fish-house-market:
+    build:
+      context: .
+      args:
+        PIP_INDEX_URL: ${PIP_INDEX_URL:-https://pypi.tuna.tsinghua.edu.cn/simple}
+    image: fish-house-market:1.4.0
+    container_name: fish-house-market
+    restart: unless-stopped
+    ports:
+      - "${THEME_BIND:-0.0.0.0}:8077:8077"
+    environment:
+      THEME_HOST: 0.0.0.0
+      THEME_PORT: 8077
+      THEME_DATA_DIR: /data
+      THEME_MAX_UPLOAD_MB: 200
+    volumes:
+      - ./server-data:/data
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8077/api/health', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s

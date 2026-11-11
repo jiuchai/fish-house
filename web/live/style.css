@@ -102,21 +102,29 @@ body {
 .sound {
   right: 20px;
   top: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
   width: 36px;
   height: 36px;
+  padding: 0;
   border-radius: 50%;
-  font-size: 16px;
   line-height: 1;
   opacity: .55;
 }
 .sound:hover { opacity: 1; }
 .sound.muted { opacity: .8; }
+.sound .sound-ico { width: 18px; height: 18px; display: block; flex: 0 0 auto; }
+.sound .ico-off { display: none; }
+.sound.muted .ico-on { display: none; }
+.sound.muted .ico-off { display: block; }
+.sound .sound-text { font-size: 12px; letter-spacing: .02em; white-space: nowrap; }
+.sound .sound-text:empty { display: none; }
 .sound.hint {
   width: auto;
-  padding: 0 12px;
+  padding: 0 14px;
   border-radius: 999px;
-  font-size: 12px;
-  letter-spacing: .02em;
   opacity: .95;
 }
 .sound.attention {
@@ -151,9 +159,14 @@ body {
   text-align: left;
   white-space: nowrap;
   overflow: hidden;
-  transition: opacity .2s ease, transform .2s ease;
+  opacity: 1;
+  transition: opacity .45s ease, transform .45s ease;
 }
-.bubble.hidden { display: none !important; }
+.bubble.hidden {
+  opacity: 0;
+  transform: translateX(-50%) translateY(8px);
+  pointer-events: none;
+}
 #bubbleText {
   overflow: hidden;
   text-overflow: ellipsis;

@@ -5,9 +5,12 @@ from __future__ import annotations
 import asyncio
 import random
 import re
+import time
 import uuid
 from pathlib import Path
 from typing import Any
+
+from astrbot.api import logger
 
 
 class FlowMixin:
@@ -102,6 +105,31 @@ class FlowMixin:
             for item in self.flow.get("edges") or []
             if item.get("from") == node_id
         ]
+
+    def queue_goto(self, node_id: str) -> bool:
+        """记下本轮想去的目的地，等自动流程走到包含它的分叉时再切。"""
+        node = self._flow_node(str(node_id or "").strip())
+        if node is None:
+            return False
+        self._pending_next = str(node.get("id") or "")
+        return True
+
+    def _flow_preview(self, start_id: str, depth: int = 5) -> tuple[list[str], dict | None]:
+        """沿唯一出边往下看，返回会自动经过的节点名和第一个分叉节点。"""
+        chain: list[str] = []
+        node = self._flow_node(start_id)
+        seen = {start_id}
+        while node is not None and len(chain) < depth:
+            outgoing = self._flow_outgoing(str(node.get("id") or ""))
+            if len(outgoing) != 1:
+                return chain, node if len(outgoing) > 1 else None
+            target = self._flow_node(str(outgoing[0].get("to") or ""))
+            if target is None or str(target.get("id") or "") in seen:
+                return chain, None
+            seen.add(str(target.get("id") or ""))
+            chain.append(f"{target.get('id')}={target.get('label')}")
+            node = target
+        return chain, None
 
     def _start_node(self) -> dict[str, Any] | None:
         """画布的起点：第一个循环节点，没有循环节点就用第一个节点。"""
@@ -293,6 +321,9 @@ class FlowMixin:
         if node is None:
             return False
         nid = node["id"]
+        if nid == self._pending_next:
+            # 已经走到模型选的目标，这条记录用完就清掉，免得影响后面的分叉。
+            self._pending_next = ""
         video = self._node_video(node)
         # 气泡每次都由模型现生成，进入节点后异步补上。
         await self._set_state(
@@ -306,7 +337,7 @@ class FlowMixin:
         bubble_task = asyncio.create_task(self._bubble_after_enter(nid))
         self._tasks.add(bubble_task)
         bubble_task.add_done_callback(self._tasks.discard)
-        # 一次性节点播完自动接下一节点；回消息这类循环节点播一轮后也放下手机。
+        # 一次性节点播完自动接下一节点；回消息这类节点播一轮后再看要不要走。
         if not node.get("loop") or node.get("role") == "phone":
             duration = float(node.get("duration") or 0)
             if duration <= 0:
@@ -314,10 +345,105 @@ class FlowMixin:
                 duration = float((item or {}).get("duration") or 0)
             if duration <= 0:
                 duration = 5.0
-            task = asyncio.create_task(self._flow_advance_after(nid, duration + 0.25))
-            self._tasks.add(task)
-            task.add_done_callback(self._tasks.discard)
+            self.schedule_advance(nid, duration + 0.25)
+        elif node.get("role") in {"work", "both"}:
+            # 循环工作节点：空闲超时自动走向下一步。
+            self._schedule_idle(nid)
         return True
+
+    def schedule_advance(self, node_id: str, delay: float) -> None:
+        task = asyncio.create_task(self._flow_advance_after(node_id, delay))
+        self._tasks.add(task)
+        task.add_done_callback(self._tasks.discard)
+
+    def idle_timeout(self) -> float:
+        """工作/回消息这类循环节点空闲多久（秒）自动走向下一步。"""
+        return 60.0
+
+    def _touch_idle(self) -> None:
+        """收到新消息时推迟当前循环工作节点的空闲截止时间。"""
+        node = self._flow_node(str(self.state.get("node_id") or ""))
+        if node is None or not node.get("loop") or node.get("role") not in {"work", "both"}:
+            return
+        self._idle_deadline = time.time() + self.idle_timeout()
+
+    def _schedule_idle(self, node_id: str) -> None:
+        """进入循环工作节点后，空闲超时自动走向下一步。"""
+        self._idle_deadline = time.time() + self.idle_timeout()
+        task = getattr(self, "_idle_task", None)
+        if task is not None and not task.done():
+            task.cancel()
+        task = asyncio.create_task(self._idle_watch(node_id))
+        self._idle_task = task
+        self._tasks.add(task)
+        task.add_done_callback(self._tasks.discard)
+
+    async def _idle_watch(self, node_id: str) -> None:
+        try:
+            while True:
+                remaining = float(getattr(self, "_idle_deadline", 0) or 0) - time.time()
+                if remaining > 0:
+                    await asyncio.sleep(min(remaining, 1.0))
+                    continue
+                if self.state.get("mode") != "flow" or str(self.state.get("node_id") or "") != node_id:
+                    return
+                node = self._flow_node(node_id)
+                if node is None or not node.get("loop") or node.get("role") not in {"work", "both"}:
+                    return
+                outgoing = self._flow_outgoing(node_id)
+                if not outgoing:
+                    return
+                logger.info(f"大肥鱼画布：工作节点 {node_id} 空闲超时，自动走向下一步")
+                await self._flow_advance_after(node_id, 0)
+                return
+        except asyncio.CancelledError:
+            return
+
+    def _flow_next_toward(self, node_id: str, target: str, depth: int = 4) -> str:
+        """在 node_id 的出边里找一条能在几步内走到 target 的，用来回到工作节点。"""
+        for edge in self._flow_outgoing(node_id):
+            first = str(edge.get("to") or "")
+            if not first:
+                continue
+            if first == target:
+                return first
+            seen = {node_id, first}
+            frontier = [first]
+            for _ in range(max(0, depth - 1)):
+                following: list[str] = []
+                for cur in frontier:
+                    for nxt in self._flow_outgoing(cur):
+                        to = str(nxt.get("to") or "")
+                        if not to or to in seen:
+                            continue
+                        if to == target:
+                            return first
+                        seen.add(to)
+                        following.append(to)
+                frontier = following
+                if not frontier:
+                    break
+        return ""
+
+    def _flow_reaches(self, node_id: str, target: str, depth: int = 12) -> bool:
+        """从 node_id 顺着连线往下走，能不能走到 target。"""
+        seen = {node_id}
+        frontier = [node_id]
+        for _ in range(max(0, depth)):
+            following: list[str] = []
+            for cur in frontier:
+                for edge in self._flow_outgoing(cur):
+                    to = str(edge.get("to") or "")
+                    if not to or to in seen:
+                        continue
+                    if to == target:
+                        return True
+                    seen.add(to)
+                    following.append(to)
+            frontier = following
+            if not frontier:
+                break
+        return False
 
     async def _flow_advance_after(self, node_id: str, delay: float) -> None:
         try:
@@ -325,8 +451,56 @@ class FlowMixin:
             if self.state.get("mode") != "flow" or self.state.get("node_id") != node_id:
                 return
             outgoing = self._flow_outgoing(node_id)
-            if outgoing:
-                # 一次性节点播完自动接下一节点；多条出边默认走第一条，模型可在后续消息里改。
-                await self.flow_goto(str(outgoing[0].get("to") or ""))
+            if not outgoing:
+                return
+            pending = str(self._pending_next or "")
+            back = str(self._return_to or "")
+            if pending and pending != node_id:
+                targets = {str(item.get("to") or "") for item in outgoing}
+                # 模型选的目标不在后面的连线上：这一条播完就直接跳过去。
+                if (
+                    pending not in targets
+                    and self._flow_node(pending) is not None
+                    and not self._flow_reaches(node_id, pending)
+                ):
+                    self._pending_next = ""
+                    await self.flow_goto(pending)
+                    return
+            if len(outgoing) > 1:
+                # 多条出边时：模型这轮选的目标 > 回消息前的来源 > 能走到它们的那条 > 第一条。
+                chosen = next(
+                    (item for item in outgoing if str(item.get("to") or "") == pending),
+                    None,
+                )
+                if chosen is None and pending:
+                    # 目标在后面但不在这一条出边上，顺着连线一步步走过去。
+                    toward = self._flow_next_toward(node_id, pending)
+                    chosen = next(
+                        (item for item in outgoing if str(item.get("to") or "") == toward),
+                        None,
+                    )
+                    if chosen is None:
+                        # 后面根本走不到，直接跳过去，不能卡在这儿。
+                        self._pending_next = ""
+                        self._return_to = ""
+                        await self.flow_goto(pending)
+                        return
+                if chosen is None and back:
+                    chosen = next(
+                        (item for item in outgoing if str(item.get("to") or "") == back),
+                        None,
+                    )
+                    if chosen is None:
+                        toward = self._flow_next_toward(node_id, back)
+                        chosen = next(
+                            (item for item in outgoing if str(item.get("to") or "") == toward),
+                            None,
+                        )
+                if chosen is not None and str(chosen.get("to") or "") == pending:
+                    self._pending_next = ""
+                self._return_to = ""
+                await self.flow_goto(str((chosen or outgoing[0]).get("to") or ""))
+                return
+            await self.flow_goto(str(outgoing[0].get("to") or ""))
         except asyncio.CancelledError:
             return

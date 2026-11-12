@@ -20,6 +20,7 @@
     }
     h1 { margin: 0 0 8px; font-size: 20px; font-weight: 600; }
     p { margin: 0 0 18px; font-size: 13px; line-height: 1.7; color: #9fb0c9; word-break: break-all; }
+    p.warn { color: #ffb86b; }
     a {
       display: inline-block; padding: 10px 20px; border-radius: 999px;
       background: #4f8cff; color: #fff; text-decoration: none; font-size: 14px;
@@ -35,10 +36,43 @@
   </main>
   <script>
     // 面板、接口、视频都在插件自己的服务里，这里只负责把浏览器带过去。
-    const target = `http://${location.hostname}:47613/`;
-    document.getElementById("link").href = target;
-    document.getElementById("tip").textContent = target;
-    location.replace(target);
+    // 端口由插件启动时写进同目录的 port.json，改端口后不用改这个页面。
+    const FALLBACK_PORT = 47613;
+    function showTip(text, warn) {
+      const tip = document.getElementById("tip");
+      tip.textContent = text;
+      tip.className = warn ? "warn" : "";
+    }
+    function tryOpen(port) {
+      const actual = port || FALLBACK_PORT;
+      const target = `http://${location.hostname}:${actual}/`;
+      document.getElementById("link").href = target;
+      showTip(`正在打开 ${target}`, false);
+      // 先探一下端口能不能连上（跨源只能用 no-cors，只关心成功/失败）。
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 3000);
+      fetch(target, { mode: "no-cors", cache: "no-store", signal: controller.signal })
+        .then(() => {
+          clearTimeout(timer);
+          location.replace(target);
+        })
+        .catch(() => {
+          clearTimeout(timer);
+          const extra = location.protocol === "https:"
+            ? " 当前页面是 https，浏览器也可能拦截到 http 的连接。"
+            : "";
+          showTip(
+            `连不上 ${target}。可能是端口 ${actual} 没有放行：` +
+            "云服务器在安全组放行入站 TCP，Windows 在防火墙添加对应入站规则；" +
+            `也可能插件刚改完端口还没重载。${extra}`,
+            true,
+          );
+        });
+    }
+    fetch("./port.json", { cache: "no-store" })
+      .then((response) => (response.ok ? response.json() : null))
+      .then((data) => tryOpen(Number(data && data.port) || 0))
+      .catch(() => tryOpen(0));
   </script>
 </body>
 </html>

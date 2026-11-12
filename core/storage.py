@@ -319,9 +319,25 @@ class StorageMixin:
         self._build_export_zip()
         if not self.state.get("node_id"):
             await self.force_rest()
+        # 重启后如果恢复在循环工作节点，之前没有走 flow_goto，得补一个空闲监视，
+        # 否则停在「循环工作」上永远不超时，也不回待机。
+        node = self._flow_node(str(self.state.get("node_id") or ""))
+        if node is not None and node.get("loop") and node.get("role") in {"work", "both"}:
+            self._schedule_idle(str(node.get("id") or ""))
         self.server.publish_state(dict(self.state))
         await self.server.start(self.server_port)
+        self._write_panel_port()
         logger.info(f"大肥鱼的小屋已加载，控制台端口：{self.server_port}")
+
+    def _write_panel_port(self) -> None:
+        """把控制台端口写进插件页目录，WebUI 跳转页启动时读它，改端口不必改页面。"""
+        try:
+            self._write_json(
+                PLUGIN_ROOT / "pages" / "panel" / "port.json",
+                {"port": int(self.server_port or 0)},
+            )
+        except OSError as exc:
+            logger.warning(f"大肥鱼的小屋写入面板端口失败: {exc}")
 
     async def terminate(self) -> None:
         for task in list(self._tasks):

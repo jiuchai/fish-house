@@ -12,7 +12,7 @@ desc: |
   - 主题：整套配置可导出/导入/应用，自带主题市场（FastAPI 服务端）；
   - 活动气泡：每次进入节点由模型现写一句，显示 3 秒后淡出；
   - 提供独立公共链接，不需要登录 AstrBot 面板也能看壁纸。
-version: 3.0.0
+version: 3.0.1
 author: jiuchai
 astrbot_version: ">=4.9.0"
 support_platforms:

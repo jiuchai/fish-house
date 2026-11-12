@@ -1,4 +1,4 @@
-﻿# Python
+﻿﻿﻿﻿# Python
 __pycache__/
 *.py[cod]
 .venv/
@@ -18,6 +18,9 @@ frontend/dist/
 # 打包产物
 astrbot_plugin_fish_house-*.zip
 .trae-html-share-packages/
+
+# 运行时生成（插件启动时写入当前控制台端口）
+pages/panel/port.json
 
 # Editor / OS
 .DS_Store

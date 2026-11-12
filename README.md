@@ -2,7 +2,7 @@
 
 > 给 AstrBot 用的视频壁纸插件：主题画布上的每个节点就是一段视频，节点怎么连，壁纸就怎么演。
 
-**v3.0.0** · AstrBot >= 4.9.0 · Vue 3 + Element Plus 面板 · MIT License
+**v3.0.1** · AstrBot >= 4.9.0 · Vue 3 + Element Plus 面板 · MIT License
 
 ---
 
@@ -147,6 +147,7 @@ http://服务器地址:47613/fish_house/index.html # 独立壁纸页
 
 - 页面首次加载拉一次 `state.json` / `config.json`，之后完全靠 WebSocket 推送，不轮询；
 - 视频带声自动播放，被浏览器拦截时回退静音，右上角有声音按钮；
+- **端口没放行就打不开**：云服务器要在安全组放行入站 TCP（默认 47613），Windows 要在防火墙加入站规则；从 WebUI 点进插件页时如果连不上，页面会直接提示「端口可能未放行」。
 - 气泡跟随状态推送，超时自动淡出；
 - 断线 3 秒自动重连。
 
@@ -301,6 +302,15 @@ python app.py          # 或 docker compose up -d --build
 ```
 
 前端构建后把 `web/panel` 同步到插件目录，重启 AstrBot 或强刷页面即可。
+
+---
+
+## 更新日志
+
+### v3.0.1
+
+- 优化面板的 Vue 结构：状态与接口调用集中到 store，页面按 `views` / `components` / `dialogs` 分层，组件只负责渲染。
+- 修复无法修改控制台端口的问题：插件启动时把实际端口写入 `pages/panel/port.json`，WebUI 插件页据此跳转，改端口后重载插件即可；连不上时会提示对应端口可能未放行。
 
 ---
 

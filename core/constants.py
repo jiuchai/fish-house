@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 PLUGIN_NAME = "astrbot_plugin_fish_house"
-VERSION = "3.0.0"
+VERSION = "3.0.1"
 
 PLUGIN_ROOT = Path(__file__).resolve().parent.parent
 """插件根目录（core/ 的上一级）。"""

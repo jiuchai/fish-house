@@ -1,9 +1,9 @@
 import { defineConfig } from "vite";
 import vue from "@vitejs/plugin-vue";
 
-// 面板由插件自己的 Web 服务（默认 47613）托管，接口同源。
-// 开发时把 /api 与 /fish_house 代理到本机插件服务。
-const SERVER_TARGET = process.env.FISH_HOUSE_TARGET || "http://127.0.0.1:47613";
+// 面板由 AstrBot 插件页托管，构建产物直接放进 pages/panel。
+// 开发时把 /api 与 /fish_house 代理到 AstrBot 控制台（默认 6185）。
+const SERVER_TARGET = process.env.FISH_HOUSE_TARGET || "http://127.0.0.1:6185";
 
 export default defineConfig({
   plugins: [vue()],
@@ -13,11 +13,10 @@ export default defineConfig({
     proxy: {
       "/api": { target: SERVER_TARGET, changeOrigin: false },
       "/fish_house": { target: SERVER_TARGET, changeOrigin: false },
-      "/ws": { target: SERVER_TARGET, ws: true, changeOrigin: false },
     },
   },
   build: {
-    outDir: "../web/panel",
+    outDir: "../pages/panel",
     emptyOutDir: true,
   },
 });

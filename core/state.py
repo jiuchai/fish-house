@@ -109,6 +109,19 @@ class StateMixin:
             # 已被清理，这时直接回到当前画布的第一个循环节点。
             if node is None or not self._node_video_ready(node):
                 node = self._start_node()
+            # 一次性节点和回消息节点是靠播放计时往前推的，重启后没有那个计时任务，
+            # 接着停在上面就再也不动了；改成回到常驻的循环节点。
+            if node is not None and (
+                not node.get("loop") or node.get("role") == "phone"
+            ):
+                node = next(
+                    (
+                        item
+                        for item in (self.flow.get("nodes") or [])
+                        if item.get("loop") and item.get("role") != "phone"
+                    ),
+                    None,
+                ) or self._start_node()
             if node is None:
                 return
             self.state.update(

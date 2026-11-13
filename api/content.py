@@ -68,6 +68,7 @@ class ContentApiMixin:
             self._write_config()
         elif action == "goto":
             node_id = str(payload.get("node_id") or "")
+            self._reset_flow_transient()
             if not await self.flow_goto(node_id, text=str(payload.get("text") or "")):
                 return error_response("节点不存在")
         else:

@@ -337,15 +337,12 @@ class FlowMixin:
         bubble_task = asyncio.create_task(self._bubble_after_enter(nid))
         self._tasks.add(bubble_task)
         bubble_task.add_done_callback(self._tasks.discard)
+        # 游走中：中间经过的每个节点都播一轮就走下一跳（不跳节点、也不停下等消息）。
+        if self._walk_path:
+            self.schedule_advance(nid, self._node_duration(nid) + 0.25)
         # 一次性节点播完自动接下一节点；回消息这类节点播一轮后再看要不要走。
-        if not node.get("loop") or node.get("role") == "phone":
-            duration = float(node.get("duration") or 0)
-            if duration <= 0:
-                item = self._library_item(str(node.get("media_id") or ""))
-                duration = float((item or {}).get("duration") or 0)
-            if duration <= 0:
-                duration = 5.0
-            self.schedule_advance(nid, duration + 0.25)
+        elif not node.get("loop") or node.get("role") == "phone":
+            self.schedule_advance(nid, self._node_duration(nid) + 0.25)
         elif node.get("role") in {"work", "both"}:
             # 循环工作节点：空闲超时自动走向下一步。
             self._schedule_idle(nid)
@@ -445,27 +442,109 @@ class FlowMixin:
                 break
         return False
 
+    def _node_duration(self, node_id: str) -> float:
+        """节点播一轮需要的秒数，用于游走和一次性节点推进。"""
+        node = self._flow_node(node_id)
+        if node is None:
+            return 5.0
+        duration = float(node.get("duration") or 0)
+        if duration <= 0:
+            item = self._library_item(str(node.get("media_id") or ""))
+            duration = float((item or {}).get("duration") or 0)
+        if duration <= 0:
+            duration = 5.0
+        return duration
+
+    def _flow_path(self, start: str, target: str) -> list[str] | None:
+        """沿出边找一条从 start 到 target 的最短路径，找不到返回 None。"""
+        if start == target:
+            return [start]
+        from collections import deque
+
+        prev: dict[str, str | None] = {start: None}
+        queue: deque = deque([start])
+        while queue:
+            cur = queue.popleft()
+            if len(prev) > 200:
+                return None
+            for edge in self._flow_outgoing(cur):
+                to = str(edge.get("to") or "")
+                if not to or to in prev:
+                    continue
+                prev[to] = cur
+                if to == target:
+                    path = [to]
+                    while prev[to] is not None:
+                        path.append(prev[to])
+                        to = prev[to]
+                    return path[::-1]
+                queue.append(to)
+        return None
+
+    def _start_walk(self, target: str) -> bool:
+        """沿画布连线一步步走到 target，不跳节点。"""
+        current = str(self.state.get("node_id") or "")
+        path = self._flow_path(current, target)
+        if not path or len(path) < 2:
+            return False
+        self._walk_path = path[1:]
+        self._pending_next = ""
+        self._return_to = ""
+        task = getattr(self, "_idle_task", None)
+        if task is not None and not task.done():
+            task.cancel()
+        cur_node = self._flow_node(current)
+        if cur_node is not None and cur_node.get("loop") and cur_node.get("role") != "phone":
+            # 从循环节点出发：等这一轮播到首尾衔接点再走下一跳。
+            self._loop_end_target = self._walk_path[0]
+            self._loop_end_await = True
+        else:
+            self.schedule_advance(current, self._node_duration(current) + 0.25)
+        return True
+
+    async def goto_after_loop(self, target: str) -> bool:
+        """从循环节点切出时，等当前循环视频播到结尾再切；非循环节点直接切。"""
+        current = self._flow_node(str(self.state.get("node_id") or ""))
+        if current is not None and current.get("loop") and current.get("role") != "phone":
+            self._loop_end_await = True
+            self._loop_end_target = str(target)
+            logger.info(f"大肥鱼画布：等 {current.get('id')} 循环播完再切 {target}")
+            return True
+        return await self.flow_goto(target)
+
+    async def note_loop_end(self) -> None:
+        """壁纸页回报当前循环视频播完一轮，执行等待中的切换。"""
+        if not self._loop_end_await or not self._loop_end_target:
+            return
+        target = self._loop_end_target
+        self._loop_end_await = False
+        self._loop_end_target = ""
+        await self.flow_goto(target)
+
+    def _reset_flow_transient(self) -> None:
+        """清理游走/待切/回源等临时状态；手动切换或重置节点时调用。"""
+        self._walk_path = []
+        self._pending_next = ""
+        self._return_to = ""
+        self._loop_end_target = ""
+        self._loop_end_await = False
+
     async def _flow_advance_after(self, node_id: str, delay: float) -> None:
         try:
             await asyncio.sleep(max(0.5, delay))
             if self.state.get("mode") != "flow" or self.state.get("node_id") != node_id:
+                return
+            # 游走中：按路径走下一跳，不跳节点。
+            if self._walk_path:
+                next_id = self._walk_path[0]
+                self._walk_path = self._walk_path[1:]
+                await self.flow_goto(next_id)
                 return
             outgoing = self._flow_outgoing(node_id)
             if not outgoing:
                 return
             pending = str(self._pending_next or "")
             back = str(self._return_to or "")
-            if pending and pending != node_id:
-                targets = {str(item.get("to") or "") for item in outgoing}
-                # 模型选的目标不在后面的连线上：这一条播完就直接跳过去。
-                if (
-                    pending not in targets
-                    and self._flow_node(pending) is not None
-                    and not self._flow_reaches(node_id, pending)
-                ):
-                    self._pending_next = ""
-                    await self.flow_goto(pending)
-                    return
             if len(outgoing) > 1:
                 # 多条出边时：模型这轮选的目标 > 回消息前的来源 > 能走到它们的那条 > 第一条。
                 chosen = next(
@@ -473,18 +552,11 @@ class FlowMixin:
                     None,
                 )
                 if chosen is None and pending:
-                    # 目标在后面但不在这一条出边上，顺着连线一步步走过去。
                     toward = self._flow_next_toward(node_id, pending)
                     chosen = next(
                         (item for item in outgoing if str(item.get("to") or "") == toward),
                         None,
                     )
-                    if chosen is None:
-                        # 后面根本走不到，直接跳过去，不能卡在这儿。
-                        self._pending_next = ""
-                        self._return_to = ""
-                        await self.flow_goto(pending)
-                        return
                 if chosen is None and back:
                     chosen = next(
                         (item for item in outgoing if str(item.get("to") or "") == back),

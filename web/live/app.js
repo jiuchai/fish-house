@@ -164,6 +164,10 @@
   function pauseLayer(video) {
     video.onended = null;
     video.onerror = null;
+    if (video._loopEnd) {
+      video.removeEventListener("timeupdate", video._loopEnd);
+      video._loopEnd = null;
+    }
     try { video.pause(); } catch (_) {}
   }
 
@@ -208,6 +212,21 @@
       next.playsInline = true;
       next.preload = "auto";
       next.style.opacity = "0";
+      // 循环视频播到结尾（首尾衔接点）时，回报后端，让后端在衔接点切下一个节点。
+      if (loop) {
+        let lastT = 0;
+        next._loopEnd = () => {
+          const t = next.currentTime;
+          // currentTime 突然回退超过 0.5 秒，说明这一轮循环结束了。
+          if (lastT > 0 && t + 0.5 < lastT) {
+            reportLoopEnd();
+          }
+          lastT = t;
+        };
+        next.addEventListener("timeupdate", next._loopEnd);
+      } else {
+        next._loopEnd = null;
+      }
       // 新层永远叠在旧层上面，旧层保持不透明垫底，避免交叉淡化时透出背景。
       next.style.zIndex = "2";
       prev.style.zIndex = "1";
@@ -278,6 +297,12 @@
   function reportPlaying(nodeId) {
     if (!nodeId || !socket || socket.readyState !== WebSocket.OPEN) return;
     try { socket.send(JSON.stringify({ type: "playing", node_id: String(nodeId) })); } catch (_) {}
+  }
+
+  // 循环视频播到首尾衔接点后，回报后端，让后端在这个点切下一个节点。
+  function reportLoopEnd() {
+    if (!socket || socket.readyState !== WebSocket.OPEN) return;
+    try { socket.send(JSON.stringify({ type: "loop_end" })); } catch (_) {}
   }
 
   function handleInitial(state) {

@@ -10,6 +10,7 @@
       </div>
     </div>
     <div class="current-node"><i></i>当前节点：{{ currentLabel }}</div>
+    <p class="muted sync-tip" v-if="!readonly">如需节点与视频同步，请保持视频页（壁纸页）激活</p>
     <div class="canvas-layout" :class="{ 'has-editor': selected && !readonly }">
       <div class="canvas" ref="canvas" @mousedown.self="startPan" @wheel="onWheel">
         <div class="world" :style="worldStyle">
@@ -65,7 +66,7 @@
         <label>提示词 / 气泡文案<textarea v-model="selected.prompt" rows="3" maxlength="300" placeholder="进入这个节点时显示在壁纸底部，例如：帮主人查天气"></textarea></label>
         <label>时长（秒）<input v-model.number="selected.duration" type="number" min="0" step="0.1" /></label>
         <div class="node-actions">
-          <button class="btn small primary" type="button" @click="play" v-if="!projectMode">播放此节点</button>
+          <button class="btn small primary" type="button" @click="play">设为当前节点</button>
           <button class="btn small" type="button" @click="save()">保存</button>
           <button class="btn small danger" type="button" @click="deleteNode" v-if="!readonly">删除</button>
         </div>

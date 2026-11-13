@@ -81,10 +81,35 @@ class ThemeMixin:
         self._prune_theme_videos()
         await self._sync_public()
         # 应用主题后直接从画布的第一个循环节点开始。
+        self._reset_flow_transient()
         start = self._start_node()
         if start and await self.flow_goto(str(start.get("id") or "")):
             return True
         await self.force_rest()
+        return True
+
+    async def _sync_active_theme(self, tid: str) -> bool:
+        """当前正在应用的主题被保存后，同步运行时素材与画布，但不重置当前节点。"""
+        if not re.fullmatch(r"[A-Za-z0-9_.-]{1,80}", tid or ""):
+            return False
+        theme_dir = self.themes_dir / tid
+        theme_file = theme_dir / "theme.json"
+        if not theme_file.is_file():
+            return False
+        theme = theme_store.read_theme_json(theme_file)
+        config = await asyncio.to_thread(
+            theme_store.materialize_theme, theme, theme_dir, self.video_dir, tid
+        )
+        self.library = config["library"]
+        self.flow = config["flow"]
+        if config["settings"].get("crossfade_ms") is not None:
+            self.settings["crossfade_ms"] = int(config["settings"]["crossfade_ms"])
+        self._ensure_library()
+        self._write_config()
+        # 保持当前节点不变（节点被删掉时才回退），只刷新素材/名称，不重头开始。
+        await self._refresh_current_node()
+        self._prune_theme_videos()
+        await self._sync_public()
         return True
 
     def _prune_theme_videos(self) -> None:

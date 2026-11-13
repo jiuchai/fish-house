@@ -189,8 +189,9 @@ class ThemeApiMixin:
             (project / "theme.json").write_text(
                 json.dumps(theme, ensure_ascii=False, indent=2), encoding="utf-8"
             )
-            if bool(payload.get("apply")) and tid == self.active_theme_id:
-                await self._apply_theme_id(tid)
+            if tid == self.active_theme_id:
+                # 保存的是正在应用的主题：直接同步运行时画布与壁纸，不重置当前节点。
+                await self._sync_active_theme(tid)
             return self._ok(project=self._project_payload(tid))
         if action == "asset_delete":
             project = self._project_dir(tid)

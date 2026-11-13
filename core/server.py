@@ -192,6 +192,8 @@ class PanelServer:
                     continue
                 if isinstance(payload, dict) and payload.get("type") == "playing":
                     await self.plugin.note_playing(str(payload.get("node_id") or ""))
+                elif isinstance(payload, dict) and payload.get("type") == "loop_end":
+                    await self.plugin.note_loop_end()
         finally:
             self._clients.discard(ws)
         return ws
@@ -291,4 +293,11 @@ class PanelServer:
             raise web.HTTPNotFound()
         if not target.is_file():
             raise web.HTTPNotFound()
-        return web.FileResponse(target)
+        resp = web.FileResponse(target)
+        # 入口 html 不缓存，否则构建后浏览器还拿着旧 html 去加载已删除的旧 hash 文件。
+        # 其余静态文件用 no-cache，避免壁纸页的固定名脚本（app.js 等）改了不生效。
+        if target.suffix == ".html":
+            resp.headers["Cache-Control"] = "no-store"
+        else:
+            resp.headers["Cache-Control"] = "no-cache"
+        return resp

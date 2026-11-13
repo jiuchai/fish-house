@@ -189,25 +189,49 @@ function applyState(state) {
   if (panel.overview) panel.overview.state = state;
 }
 
-let poller = null;
+function applyConfig(config) {
+  if (!config) return;
+  if (config.crossfade_ms !== undefined) panel.settingsForm.crossfade_ms = Number(config.crossfade_ms);
+  if (config.show_bubble !== undefined) panel.settingsForm.bubble_enabled = Boolean(config.show_bubble);
+}
 
-// 面板不再另开 WebSocket，和壁纸页一样按固定间隔拉 state。
+// 面板通过 WebSocket 接收壁纸状态与配置推送，不再轮询 /api/state。
+let liveWs = null;
+let liveReconnectTimer = null;
+
 export function connectLive() {
-  if (poller) return;
-  const tick = async () => {
-    try {
-      const data = await apiGet("state");
-      applyState(data.state);
-    } catch (_) {}
+  if (liveWs && (liveWs.readyState === WebSocket.OPEN || liveWs.readyState === WebSocket.CONNECTING)) return;
+  const scheme = location.protocol === "https:" ? "wss://" : "ws://";
+  let socket;
+  try {
+    socket = new WebSocket(`${scheme}${location.host}/ws`);
+  } catch (_) {
+    scheduleLiveReconnect();
+    return;
+  }
+  liveWs = socket;
+  socket.onmessage = (event) => {
+    let payload;
+    try { payload = JSON.parse(event.data); } catch (_) { return; }
+    if (!payload || typeof payload !== "object") return;
+    if (payload.type === "state") applyState(payload.state);
+    else if (payload.type === "config") applyConfig(payload.config);
   };
-  void tick();
-  poller = setInterval(tick, 1000);
+  socket.onclose = () => { liveWs = null; scheduleLiveReconnect(); };
+  socket.onerror = () => { try { socket.close(); } catch (_) {} };
+}
+
+function scheduleLiveReconnect() {
+  if (liveReconnectTimer) return;
+  liveReconnectTimer = setTimeout(() => {
+    liveReconnectTimer = null;
+    connectLive();
+  }, 2000);
 }
 
 export function closeLive() {
-  if (!poller) return;
-  clearInterval(poller);
-  poller = null;
+  if (liveReconnectTimer) { clearTimeout(liveReconnectTimer); liveReconnectTimer = null; }
+  if (liveWs) { try { liveWs.onclose = null; liveWs.close(); } catch (_) {} liveWs = null; }
 }
 
 /* ---------------- 主题 ---------------- */
@@ -323,6 +347,8 @@ export async function saveProjectFlow(flow) {
       config: panel.project.theme.config,
     });
     panel.project = data.project;
+    // 保存的是正在应用的主题时，后端已软同步运行时画布；这里刷新首页画布与壁纸状态。
+    await load();
     toast("画布已保存到项目");
   } catch (error) {
     toast(`保存失败：${error.message || error}`, "err");

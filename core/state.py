@@ -79,6 +79,7 @@ class StateMixin:
 
     async def force_rest(self) -> None:
         """回到画布的第一个循环节点；画布为空时只清空播放状态。"""
+        self._reset_flow_transient()
         node = self._start_node()
         if node is not None:
             await self.flow_goto(str(node.get("id") or ""))

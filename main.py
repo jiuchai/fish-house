@@ -71,6 +71,11 @@ class FishHousePlugin(
         # 循环工作节点的空闲截止时间（秒），到了就自动走向下一步。
         self._idle_deadline = 0.0
         self._idle_task: asyncio.Task | None = None
+        # 目标游走路径：模型选了远处节点后，沿连线一步步经过的节点序列（不含当前）。
+        self._walk_path: list[str] = []
+        # 从循环节点切出时，等壁纸页回报「循环播完」再切的目标。
+        self._loop_end_target = ""
+        self._loop_end_await = False
         self.library: list[dict[str, Any]] = []
         self.themes_dir = self.data_dir / "themes"
         self.themes_dir.mkdir(parents=True, exist_ok=True)
@@ -144,7 +149,7 @@ class FishHousePlugin(
                             target_id = str(outgoing[0].get("to") or "")
                             if target_id and target_id != cur_id:
                                 event.set_extra("_fish_flow_advanced", True)
-                                await self.flow_goto(target_id)
+                                await self.goto_after_loop(target_id)
                         elif outgoing:
                             logger.info(f"大肥鱼画布：等待模型从 {cur_id} 选择下一步")
                     elif current.get("role") == "both":
@@ -169,7 +174,7 @@ class FishHousePlugin(
                             self._return_to = cur_id
                             event.set_extra("_fish_flow_from", cur_id)
                             event.set_extra("_fish_flow_advanced", True)
-                            await self.flow_goto(phone)
+                            await self.goto_after_loop(phone)
             prompt = (
                 "\n【大肥鱼壁纸】你在私聊里有一张会动的桌面壁纸，你能在里面做什么由当前主题的画布控制。"
                 "画布上的节点各管一件事：只有专门干活的节点（名字或说明里写着干活、工作的）才接任务；"
@@ -306,27 +311,16 @@ class FishHousePlugin(
                     else []
                 )
                 if outgoing:
-                    await self.flow_goto(str(outgoing[0].get("to") or ""))
+                    await self.goto_after_loop(str(outgoing[0].get("to") or ""))
+            # 等壁纸真正走到「回消息」节点再发回复，中间不管经过什么节点都继续等，最多 10 秒。
             deadline = time.time() + 10
             while time.time() < deadline:
                 node = self._flow_node(str(self.state.get("node_id") or ""))
                 if node is None:
                     return
-                role = str(node.get("role") or "")
-                if role == "phone":
+                if node.get("role") == "phone":
                     return
-                if role in {"action", "transition"}:
-                    nxt = self._flow_outgoing(str(node.get("id") or ""))
-                    target = (
-                        self._flow_node(str(nxt[0].get("to") or ""))
-                        if len(nxt) == 1
-                        else None
-                    )
-                    if target is None or target.get("role") != "phone":
-                        return
-                    await asyncio.sleep(0.2)
-                    continue
-                return
+                await asyncio.sleep(0.2)
         except Exception as exc:
             logger.warning(f"大肥鱼的小屋等待回消息失败: {exc}")
 
@@ -348,7 +342,7 @@ class FishHousePlugin(
             outgoing = self._flow_outgoing(from_id)
             if not outgoing:
                 return
-            if await self.flow_goto(str(outgoing[0].get("to") or "")):
+            if await self.goto_after_loop(str(outgoing[0].get("to") or "")):
                 logger.info(f"大肥鱼画布兜底推进：{from_id} -> {outgoing[0].get('to')}")
         except Exception as exc:
             logger.warning(f"大肥鱼的小屋兜底推进失败: {exc}")
@@ -371,10 +365,10 @@ class FishHousePlugin(
 
     @filter.llm_tool(name="house_flow_goto")
     async def tool_flow_goto(self, event: AstrMessageEvent, node_id: str) -> str:
-        """把壁纸里的你切到画布上的某个动作节点。用户让你做事时（找东西、翻东西、查资料、删文件、写东西、跑命令、整理等）必须先调用它，选到「工作」那一类节点，否则壁纸只会演「回消息」，活干完了也看不到在干活；只是闲聊不用调用。node_id 可以是画布上的任意节点，不一定是当前节点的下一步。
+        """把壁纸里的你切到画布上的某个动作节点。用户让你做事时（找东西、翻东西、查资料、删文件、写东西、跑命令、整理等）必须先调用它，选到「工作」那一类节点；只是闲聊或只是让你休息/停下/换衣服这类切换时也用它。node_id 可以是画布上的任意节点，不一定是当前节点的下一步；选远处的节点会沿连线一步步走过去，不跳节点。
 
         Args:
-            node_id(string): 要切换到的节点 id，必须是流程图里出现的 id，例如「node_mwdk9f07」
+            node_id(string): 要切换到的节点 id，必须是流程图里出现的 id，例如「computer_loop」
         """
         if not event.is_private_chat():
             return "流程图动作只在私聊中启用。"
@@ -384,26 +378,17 @@ class FishHousePlugin(
             return f"没有这个节点。可用节点：{ids}"
         cur_id = str(self.state.get("node_id") or "")
         logger.info(f"大肥鱼画布：模型选择 {node['id']}，当前 {cur_id or '-'}")
-        direct = {
-            str(edge.get("to") or "") for edge in self._flow_outgoing(cur_id)
-        }
-        cur_node = self._flow_node(cur_id)
-        # 工作、等待这类循环节点停在原地，不会再自动推进，目标记下来就没人消费，直接切。
-        settled = bool(
-            cur_node
-            and cur_node.get("loop")
-            and cur_node.get("role") != "phone"
-        )
-        if cur_id and node["id"] not in direct and not settled and self.queue_goto(node["id"]):
-            # 等壁纸真的走到这个节点再返回，这样后面干活的工具调用正好在「工作」播着的时候执行。
-            target = str(node["id"])
-            label = str(node.get("label") or target)
-            deadline = time.time() + 9
+        label = str(node.get("label") or node["id"])
+        if node["id"] == cur_id:
+            return f"已经在「{label}」。"
+        if not self._start_walk(node["id"]):
+            return f"画布上从当前节点连不到「{label}」。"
+        # 干活类节点（work/both）：等壁纸沿路径走到再返回，后面干活的工具调用正好落在工作动画里。
+        if node.get("role") in {"work", "both"}:
+            deadline = time.time() + 20
             while time.time() < deadline:
-                if str(self.state.get("node_id") or "") == target:
-                    return f"已切到「{label}」，画面正在播它，现在可以开始干活。"
-                await asyncio.sleep(0.2)
-            return f"已记下「{label}」，这一条播完就切过去。"
-        await self.flow_goto(node["id"], umo=event.unified_msg_origin)
-        self._return_to = ""
-        return f"已切到「{node.get('label') or node['id']}」。"
+                if str(self.state.get("node_id") or "") == node["id"]:
+                    return f"已走到「{label}」，画面正在播它，现在可以开始干活。"
+                await asyncio.sleep(0.3)
+            return f"正在去「{label}」。"
+        return f"已安排去「{label}」，会沿画布一步步走过去。"
